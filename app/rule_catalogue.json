@@ -1,0 +1,27 @@
+{
+  "currency": "INR",
+  "timestamps": "UTC",
+  "refund": {
+    "cutoff_utc": "2026-06-30 18:30:00",
+    "refund_v1": [[24, "1"], [6, "0.5"], [0, "0"]],
+    "refund_v2": [[48, "1"], [12, "0.75"], [2, "0.25"], [0, "0"]],
+    "sources": ["PDF-refund_v1-1", "PDF-refund_v2-1", "PDF-refund_v2-2"],
+    "review": "Signed v2 page-2 annexure visually reviewed. Version depends on booking creation, not cancellation."
+  },
+  "penalty": {
+    "grace_minutes": {"STANDARD": 0, "SILVER": 0, "GOLD": 30},
+    "late_rate_multiplier": "1.5",
+    "battery_threshold_exclusive": 10,
+    "low_battery_fee": "150",
+    "sources": ["PDF-penalty-1", "PDF-penalty-3"],
+    "review": "Page-3 tier annexure visually reviewed. Inclusive grace; full lateness charged beyond grace."
+  },
+  "rental": {
+    "GST_rate": "0.18",
+    "minimum_hours": 2,
+    "block_hours": 24,
+    "bike_deposit": "1000",
+    "long_scooter_deposit": "500",
+    "sources": ["PDF-rental-1", "PDF-rental-2", "PDF-rental-3"]
+  }
+}

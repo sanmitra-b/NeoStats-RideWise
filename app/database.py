@@ -168,10 +168,4 @@ def query(path, session, plan: Plan):
             if plan.booking_id:
                 for table in ('payments', 'damage_reports'):
                     evidence.append(execute(c, f'SELECT * FROM {table} WHERE booking_id = ? ORDER BY ' + ('paid_at' if table == 'payments' else 'reported_at'), [plan.booking_id], scope, cap=200))
-            elif plan.operation in ('payments', 'damage'):
-                table, alias = ('payments', 'p') if plan.operation == 'payments' else ('damage_reports', 'd')
-                fields = dict(FIELDS)
-                fields.update({f: alias + '.' + f for f in (('payment_status', 'payment_type') if alias == 'p' else ('claim_status', 'damage_category'))})
-                w, args = where(plan, fields)
-                evidence = [execute(c, 'SELECT ' + alias + '.*,b.customer_id,v.hub_name' + BASE + f' JOIN {table} {alias} ON {alias}.booking_id=b.booking_id' + w + ' ORDER BY ' + alias + ('.paid_at' if alias == 'p' else '.reported_at') + ' DESC LIMIT 51', args, scope)]
     return evidence

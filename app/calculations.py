@@ -1,12 +1,15 @@
 """Decimal arithmetic; policy constants are reviewed source rules, never canned answers."""
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP, ROUND_CEILING
+import json
+from pathlib import Path
 
 D = lambda v: Decimal(str(v))
-GST = D('0.18')
-CUTOFF = datetime(2026, 6, 30, 18, 30, tzinfo=timezone.utc)
-GRACE = {'STANDARD': 0, 'SILVER': 0, 'GOLD': 30}
-REFUND_BANDS = {'refund_v1': [(24, '1'), (6, '0.5'), (0, '0')], 'refund_v2': [(48, '1'), (12, '0.75'), (2, '0.25'), (0, '0')]}
+RULES = json.loads((Path(__file__).parent / 'rule_catalogue.json').read_text())
+GST = D(RULES['rental']['GST_rate'])
+CUTOFF = datetime.strptime(RULES['refund']['cutoff_utc'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+GRACE = RULES['penalty']['grace_minutes']
+REFUND_BANDS = {v: RULES['refund'][v] for v in ('refund_v1', 'refund_v2')}
 
 def timestamp(value):
     if not value:
@@ -55,13 +58,13 @@ def charges(b, payments, damage):
         late = max(D(0), D(str((timestamp(b['actual_return_at']) - timestamp(b['scheduled_end'])).total_seconds())) / D(60))
         if late > GRACE[b['customer_tier']]:
             hours = int((late / D(60)).to_integral_value(rounding=ROUND_CEILING))
-            fee = D(hours) * D('1.5') * D(b['hourly_rate'])
+            fee = D(hours) * D(RULES['penalty']['late_rate_multiplier']) * D(b['hourly_rate'])
         if b['vehicle_type'].startswith('EV_'):
             pct = b['return_battery_pct']
             if pct is None or not 0 <= pct <= 100:
                 notes.append('Return battery reading missing or invalid; battery fee cannot be confirmed.')
-            elif pct < 10:
-                battery = D(150)
+            elif pct < RULES['penalty']['battery_threshold_exclusive']:
+                battery = D(RULES['penalty']['low_battery_fee'])
     else:
         notes.append('Booking is not completed; no actual late-return/battery fee is established.')
     damage_fee = sum((D(r['assessed_cost']) for r in damage if r['claim_status'] == 'CHARGED'), D(0))
@@ -81,11 +84,11 @@ def rental(b):
     if seconds <= 0 or seconds % 3600:
         raise ValueError('Scheduled duration is not a positive whole number of hours.')
     hours = int(seconds / 3600)
-    if hours < 2:
+    if hours < RULES['rental']['minimum_hours']:
         raise ValueError('Scheduled duration conflicts with the two-hour minimum.')
-    days, remainder = divmod(hours, 24)
+    days, remainder = divmod(hours, RULES['rental']['block_hours'])
     base = D(days) * D(b['daily_rate']) + min(D(remainder) * D(b['hourly_rate']), D(b['daily_rate']))
-    deposit = D(1000) if b['vehicle_type'] in ('BIKE', 'EV_BIKE') else D(500) if hours >= 24 else D(0)
+    deposit = D(RULES['rental']['bike_deposit']) if b['vehicle_type'] in ('BIKE', 'EV_BIKE') else D(RULES['rental']['long_scooter_deposit']) if hours >= RULES['rental']['block_hours'] else D(0)
     return {'id': 'CALC-rental', 'kind': 'calculation', 'title': 'Scheduled rental estimate', 'formula': 'full 24-hour blocks × daily rate + remaining hours × hourly rate capped at daily rate; 18% GST',
             'inputs': {'duration_hours': hours, 'hourly_rate': money(b['hourly_rate']), 'daily_rate': money(b['daily_rate'])},
             'values': {'rental_base': money(base), 'GST': money(base * GST), 'rental_total': money(base * (1 + GST)), 'deposit_no_GST': money(deposit)},

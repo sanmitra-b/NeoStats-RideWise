@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import config
 
-manifest = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in config.DATA.iterdir() if p.is_file()}
+manifest = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in config.DATA.iterdir() if p.is_file() and not p.name.startswith('~$')}
 target = config.ROOT / 'derived' / 'source_manifest.json'
 if target.exists():
     original = json.loads(target.read_text())

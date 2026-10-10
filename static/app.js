@@ -163,6 +163,7 @@ $('chatForm').addEventListener('submit', e => { e.preventDefault(); sendQuestion
 $('question').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuestion($('question').value); } });
 $('stop').addEventListener('click', () => controller?.abort());
 $('newChat').addEventListener('click', reset);
+$('newChatMobile').addEventListener('click', reset);
 $('sessionNav').addEventListener('click', showDialog); $('switchSession').addEventListener('click', showDialog);
 $('closeSession').addEventListener('click', () => $('sessionDialog').close());
 $('closeDrawer').addEventListener('click', () => document.body.classList.add('drawer-closed'));
@@ -177,10 +178,12 @@ $('policiesNav').addEventListener('click', async () => {
     const list = await (await api('/api/policies')).json(); document.body.classList.remove('drawer-closed'); activeTab = 'pdf'; selectedEvidence = list.map(p => ({ ...p, kind: 'pdf', page: 1, version: 'See original document', method: p.reviewed ? 'Hash matches reviewed source' : 'Source changed: re-review required', hash: 'Available in answer evidence', excerpt: 'Browse the original document. This catalogue does not imply a document was used in an answer.', url: '/api/policies/' + p.key })); renderEvidence();
   } catch (e) { notice(e.message); }
 });
-$('signOut').addEventListener('click', async () => {
+async function signOut() {
   controller?.abort();
   try { if (session) await api('/api/session/' + session.session_id, { method: 'DELETE' }); } catch {}
   await firebaseApi?.signOut(firebaseAuth); session = null; principal = null; clearConversation(); updateEnabled();
   $('scope').textContent = 'Not signed in'; $('principalLabel').textContent = 'Firebase authentication'; $('authBadge').textContent = config.auth_ready ? 'Sign-in required' : 'Setup required'; $('authBadge').classList.remove('verified'); $('roleState').classList.add('hidden'); if (config.auth_ready) $('loginState').classList.remove('hidden'); showDialog();
-});
+}
+$('signOut').addEventListener('click', signOut);
+$('signOutSession').addEventListener('click', signOut);
 init().catch(() => notice('Application configuration could not load. Check the local server and retry.'));

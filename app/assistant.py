@@ -3,14 +3,14 @@ import json
 import re
 from time import monotonic
 from . import config, database, calculations
-from .models import Plan
+from .models import Plan, Filter
 from .provider import provider, ProviderUnavailable
 
 def local_plan(message, session):
     q = message.lower()
     booking = re.search(r'\bB-\d{4}\b', message, re.I)
     customer = re.search(r'\bCUST\d{4}\b', message, re.I)
-    bid = booking[0].upper() if booking else session.booking_id if re.search(r'\b(it|that|this|refund|charge|penalt|payment)', q) else None
+    bid = booking[0].upper() if booking else session.booking_id if re.search(r'\b(it|its|that|this|refund|charge|penalt|payment)', q) else None
     cid = customer[0].upper() if customer else None
     if re.search(r'\b(delete|drop|update|insert|transfer|execute refund|cancel my|cancel booking)\b', q):
         return Plan(operation='refuse', clarification='I can explain records and policy, but cannot change bookings, payments, or the database.')
@@ -18,14 +18,16 @@ def local_plan(message, session):
         return Plan(operation='refuse', clarification='I cannot expose credentials or bypass access rules.')
     if re.search(r'\b(profile|kyc|tier|my account|my email|my phone|contact details)\b', q):
         return Plan(operation='profile', customer_id=cid, profile_contact=bool(re.search(r'\b(email|phone|contact|name)\b', q)))
-    if bid:
+    if bid and not any(term in q for term in ('count', 'how many', 'total revenue', 'by hub', 'across')):
         op = 'refund' if 'refund' in q else 'charges' if any(x in q for x in ('late', 'penalt', 'charge', 'damage', 'battery fee')) else 'rental' if any(x in q for x in ('rental cost', 'rental estimate', 'rental rate')) else 'payments' if 'pay' in q else 'bookings'
         return Plan(operation=op, booking_id=bid, customer_id=cid)
     if any(x in q for x in ('policy', 'rule', 'how to charge', 'charging', 'ev guide', 'deposit', 'eligib', 'licence', 'license', 'minimum age', 'no show', 'no-show', 'breakdown', 'refund', 'late return', 'cancellation')):
         topic = 'refund' if 'refund' in q or 'cancel' in q else 'penalty' if 'late' in q or 'damage' in q else 'ev' if any(x in q for x in ('ev', 'charging', 'battery', 'breakdown')) else 'rental'
         return Plan(operation='policy', topic=topic)
-    if re.search(r'\b(my bookings|list bookings|show bookings|upcoming bookings)\b', q):
-        return Plan(operation='bookings', customer_id=cid)
+    listing = re.fullmatch(r'(?:please )?(?:(?:show|list) )?(?:my )?(?:(upcoming|completed|ongoing) )?bookings[?.! ]*', q.strip())
+    if listing:
+        status = {'upcoming': 'UPC', 'completed': 'CMP', 'ongoing': 'ONG'}.get(listing[1])
+        return Plan(operation='bookings', customer_id=cid, filters=[Filter(field='booking_status', value=status)] if status else [])
     return None
 
 def facts_answer(evidence):
@@ -75,6 +77,14 @@ async def answer(message, session, policies, emit, generation):
         plan = local_plan(message, session)
         if plan is None:
             plan = await provider.plan(message, session)
+            # A grouped/financial metric is an aggregate request; never silently
+            # ignore a model-selected GROUP BY while returning record lists.
+            if plan.operation in ('bookings', 'payments', 'damage') and (plan.group_by != 'none' or plan.metric != 'count' or re.search(r'\b(count|how many|number of|total bookings)\b', message, re.I)):
+                plan.operation = 'analytics'
+            elif plan.operation not in ('analytics', 'clarify', 'refuse') and (plan.group_by != 'none' or plan.metric != 'count'):
+                raise ValueError('The planned grouping does not apply to that tool. Please specify a record list or a supported aggregate.')
+        if plan.operation in ('refund', 'charges', 'rental') and not plan.booking_id and session.booking_id:
+            plan.booking_id = session.booking_id
         check_scope(plan)
         await event('Router', 'completed', 'Selected: ' + plan.operation)
         if plan.operation in ('clarify', 'refuse'):

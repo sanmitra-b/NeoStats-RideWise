@@ -41,6 +41,28 @@ def test_analytics_avoids_child_fanout():
         expected = c.execute("SELECT ROUND(SUM(amount),2) FROM payments WHERE payment_status='SUCCESS' AND payment_type='BOOKING'").fetchone()[0]
     assert result == expected
 
+def test_payment_status_filters_and_vehicles():
+    s=Session('s','support_agent',None)
+    result=database.query(config.DB,s,Plan(operation='payments',filters=[Filter(field='payment_status',value='FAILED')]))
+    assert result[0]['rows'] and all(r['payment_status']=='FAILED' for r in result[0]['rows'])
+    result=database.query(config.DB,s,Plan(operation='vehicles',filters=[Filter(field='status',value='ACTIVE')]))
+    assert result[0]['rows'] and all(r['status']=='ACTIVE' for r in result[0]['rows'])
+
+def test_stream_and_protected_pdf_routes(cid):
+    p=Principal(uid='stream-evaluator',role='evaluator')
+    app.dependency_overrides[auth.principal]=lambda:p
+    try:
+        with TestClient(app) as c:
+            s=c.post('/api/session',json={'role':'customer','customer_id':cid}).json()
+            r=c.post('/api/chat/stream',json=dict(session_id=s['session_id'],generation=0,request_id='stream-check',message='Show my bookings'))
+            assert r.status_code==200 and '"type": "final"' in r.text
+            assert '"worker": "Booking / Payments"' in r.text
+            pdf=c.get('/api/policies/refund_v2')
+            assert pdf.status_code==200 and pdf.content.startswith(b'%PDF')
+            assert c.get('/api/policies/ridewise.db').status_code==404
+    finally:
+        app.dependency_overrides.clear()
+
 def test_unconfigured_auth_and_cross_origin_fail_closed():
     with TestClient(app) as c:
         assert c.get('/health').status_code == 200

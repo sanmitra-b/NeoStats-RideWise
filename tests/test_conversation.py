@@ -13,6 +13,12 @@ def test_followup_and_cross_customer_refusal():
     r = asyncio.run(answer('Show CUST0002 bookings',s,Policies(config.DATA),emit,0))
     assert r['state']=='refused' and not r['evidence']
 
+def test_filtered_language_is_not_silently_dropped():
+    s=Session('a','customer','CUST0001')
+    p=local_plan('Show my upcoming bookings',s)
+    assert p.filters[0].value=='UPC'
+    assert local_plan('Show my bookings in July at Koramangala',s) is None
+
 def test_scan_annexures_are_present_and_cited():
     policies=Policies(config.DATA)
     assert len(policies.valid)==5

@@ -110,6 +110,10 @@ async def chat(body: ChatRequest, p: Principal = Depends(auth.principal)):
         return {**result, 'events': events, 'request_id': body.request_id, 'generation': body.generation}
     except asyncio.TimeoutError:
         return {'state': 'unavailable', 'answer': 'Request deadline reached. Please retry.', 'evidence': [], 'events': events}
+    except HTTPException:
+        raise
+    except Exception:
+        return {'state': 'unavailable', 'answer': 'The request could not finish safely. Please retry.', 'evidence': [], 'events': events}
     finally:
         s.busy = False
 
