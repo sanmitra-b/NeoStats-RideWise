@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+secrets/
+*service*account*.json
+firebase-admin*.json
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+derived/
+logs/
+*.log
+Neostats Hackathon AI Usecase 3/
+*.db
+*.xlsx
+*.pdf
+*.png
+*.svg
+.vscode/
+Activate-Ecothon.ps1
