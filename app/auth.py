@@ -17,7 +17,8 @@ def verify(token):
             firebase_admin.get_app()
         except ValueError:
             firebase_admin.initialize_app(credentials.ApplicationDefault(), {'projectId': config.PROJECT})
-        claims = auth.verify_id_token(token, check_revoked=True)
+        # Allow modest laptop clock drift; signatures/audience/revocation remain checked.
+        claims = auth.verify_id_token(token, check_revoked=True, clock_skew_seconds=30)
         role = claims.get('role')
         if role not in ('customer', 'support_agent', 'evaluator'):
             raise ValueError('No trusted role')

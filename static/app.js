@@ -60,7 +60,10 @@ async function login(custom = false) {
     if (custom) { const token = $('customToken').value; $('customToken').value = ''; await firebaseApi.signInWithCustomToken(firebaseAuth, token); }
     else { const password = $('password').value; $('password').value = ''; await firebaseApi.signInWithEmailAndPassword(firebaseAuth, $('email').value, password); }
     await signedIn();
-  } catch { $('sessionError').textContent = 'Sign-in or assigned access could not be verified. Check credentials and administrator role assignment.'; }
+  } catch (error) {
+    const code = /^auth\/[a-z-]+$/.test(error?.code || '') ? ` (${error.code})` : '';
+    $('sessionError').textContent = 'Sign-in or assigned access could not be verified. Check credentials and administrator role assignment.' + code;
+  }
 }
 async function startSession() {
   $('sessionError').textContent = '';

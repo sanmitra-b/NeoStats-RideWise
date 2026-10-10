@@ -25,6 +25,10 @@ python scripts/provision_identity.py --uid hackathon-evaluator --role evaluator 
 
 The CLI changes Firebase claims and a private local UID/customer mapping. It is an administrator action, never an app endpoint. Keep the evaluator token private. Paste it in **Session & access → Evaluator access**; the browser exchanges the custom token for a Firebase ID token held only in memory. An evaluator then selects Customer + ID or Support Agent. Regular principals cannot select an elevated role or someone else's customer ID. No identity means no protected database access.
 
+Custom sign-in tokens expire after one hour. To generate a fresh one for another sign-in, run the evaluator provisioning command again with `--replace-token`. An active browser session refreshes its ID token automatically; reloading clears its in-memory identity. Backend verification permits 30 seconds of laptop clock drift while retaining signature, audience and revocation checks. Keep the system clock synchronized.
+
+`python scripts/check_firebase.py` performs a live evaluator token exchange, verifies its Firebase role, checks both narrowed sessions, cross-customer denial, authenticated streaming and original PDF access. It prints only check results and does not consume model quota. The default token file is `secrets/evaluator-token.txt`.
+
 ```powershell
 python scripts/check_sources.py
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
