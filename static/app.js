@@ -217,7 +217,7 @@ $('question').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shi
 $('stop').addEventListener('click', () => controller?.abort());
 $('newChat').addEventListener('click', reset);
 $('newChatMobile').addEventListener('click', reset);
-$('sessionNav').addEventListener('click', showDialog); $('switchSession').addEventListener('click', showDialog);
+$('switchSession').addEventListener('click', showDialog);
 $('closeSession').addEventListener('click', () => $('sessionDialog').close());
 $('closeDrawer').addEventListener('click', () => document.body.classList.add('drawer-closed'));
 $('openEvidence').addEventListener('click', () => document.body.classList.toggle('drawer-closed'));
