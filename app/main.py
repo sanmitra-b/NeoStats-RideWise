@@ -54,7 +54,7 @@ def index():
 
 @app.get('/health')
 def health():
-    return {'status': 'ok', 'database_ready': config.DB.exists(), 'policy_ready': bool(policies and len(policies.valid) == 5), 'semantic_ready': bool(policies and policies.semantic_ready), 'firebase_ready': auth.configured(), 'model_ready': provider.configured()}
+    return {'status': 'ok', 'database_ready': config.DB.exists(), 'policy_ready': bool(policies and len(policies.valid) == 5), 'ocr_ready': bool(policies and policies.ocr_ready), 'semantic_ready': bool(policies and policies.semantic_ready), 'firebase_ready': auth.configured(), 'model_ready': provider.configured()}
 
 @app.get('/api/config')
 def public_config():

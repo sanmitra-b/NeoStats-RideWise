@@ -191,6 +191,7 @@ function renderEvidence() {
     } else if (e.kind === 'pdf') {
       if (e.retrieval) body.append(el('p', e.retrieval.method), el('p', 'Embedding: ' + e.retrieval.embedding_model + (e.retrieval.score !== null ? ' · Cosine similarity: ' + e.retrieval.score : '')), el('p', 'Passages: ' + (e.retrieval.chunks.join(', ') || 'Reviewed annexure')));
       if (e.retrieval?.annexure_added) body.append(el('p', 'Reviewed visual annexure added to the retrieved passages.'));
+      if (e.ocr) body.append(el('p', `OCR: ${e.ocr.status} · ${e.ocr.engine}` + (e.ocr.mean_confidence != null ? ` · Mean recognition confidence: ${Math.round(e.ocr.mean_confidence * 100)}%` : '')));
       body.append(el('p', `Page ${e.page} · Version ${e.version}`), el('p', e.method), el('pre', e.excerpt), el('p', 'SHA-256 ' + e.hash, 'hash'));
       const open = el('button', 'Open original PDF ↗'); open.addEventListener('click', async () => {
         const blank = window.open('', '_blank');

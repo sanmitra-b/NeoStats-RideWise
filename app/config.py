@@ -21,3 +21,5 @@ VECTOR_PATH = ROOT / 'derived' / 'qdrant'
 EMBEDDING_CACHE = ROOT / 'derived' / 'embedding_models'
 HISTORY = ROOT / 'derived' / 'chat_history.db'
 TIMEOUT = min(45, max(5, int(os.getenv('MODEL_TIMEOUT_SECONDS', '25'))))
+
+OCR_CACHE = ROOT / 'derived' / 'ocr'

@@ -11,3 +11,6 @@ qdrant-client==1.19.1
 fastembed==0.8.1
 onnxruntime==1.31.0
 protobuf==5.29.6
+
+pymupdf==1.28.2
+rapidocr-onnxruntime==1.2.3

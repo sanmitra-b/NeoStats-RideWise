@@ -1,5 +1,6 @@
 import hashlib
 from pypdf import PdfReader
+from . import ocr
 
 FILES = {
     'rental': '01_Rental_Agreement_and_Terms.pdf',
@@ -45,11 +46,23 @@ class Policies:
             for page, pdfpage in enumerate(PdfReader(path).pages, 1):
                 text = pdfpage.extract_text() or ''
                 visual = VISUALS.get((key, page)) if reviewed else None
+                ocr_text, ocr_metadata = ocr.extract(path, digest, page) if key in ocr.TARGETS else ('', None)
+                methods = ['PDF text']
+                if ocr_text:
+                    methods.append('OCR from rendered page')
+                if visual:
+                    methods.append('reviewed visual transcription')
                 self.pages.append({'id': f'PDF-{key}-{page}', 'kind': 'pdf', 'key': key,
                     'filename': filename, 'page': page, 'version': VERSIONS[key], 'hash': digest,
-                    'reviewed': reviewed, 'method': 'PDF text + reviewed visual transcription' if visual else 'PDF text',
-                    'excerpt': text + ('\n\n' + visual if visual else ''),
+                    'reviewed': reviewed, 'method': ' + '.join(methods), 'ocr': ocr_metadata,
+                    'source_segments': [text + ('\n\n' + visual if visual else '')] + ([ocr_text] if ocr_text else []),
+                    'excerpt': text + ('\n\nOCR extraction (reviewed transcriptions take precedence for financial rules):\n' + ocr_text if ocr_text else '') + ('\n\n' + visual if visual else ''),
                     'url': f'/api/policies/{key}#page={page}'})
+
+    @property
+    def ocr_ready(self):
+        targets = [p for p in self.pages if p['key'] in ocr.TARGETS]
+        return {p['key'] for p in targets} == ocr.TARGETS and all(p['ocr']['status'] == 'complete' for p in targets)
 
     def require(self, *keys):
         if any(k not in self.valid for k in keys):

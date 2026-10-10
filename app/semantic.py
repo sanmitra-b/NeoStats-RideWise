@@ -17,13 +17,15 @@ _embedders = {}
 def chunks_for(pages):
     chunks = []
     for p in pages:
-        words = p['excerpt'].split()
-        for offset in range(0, len(words), CHUNK_WORDS - OVERLAP_WORDS):
-            text = ' '.join(words[offset:offset + CHUNK_WORDS])
-            chunks.append({'chunk_id': f"{p['id']}-chunk-{offset}", 'page_id': p['id'],
-                           'key': p['key'], 'text': text})
-            if offset + CHUNK_WORDS >= len(words):
-                break
+        # Keep native/reviewed text intact; OCR adds independent passages.
+        for segment, content in enumerate(p.get('source_segments', [p['excerpt']])):
+            words = content.split()
+            for offset in range(0, len(words), CHUNK_WORDS - OVERLAP_WORDS):
+                text = ' '.join(words[offset:offset + CHUNK_WORDS])
+                chunks.append({'chunk_id': f"{p['id']}-segment-{segment}-chunk-{offset}", 'page_id': p['id'],
+                               'key': p['key'], 'text': text})
+                if offset + CHUNK_WORDS >= len(words):
+                    break
     return chunks
 
 class Embeddings:

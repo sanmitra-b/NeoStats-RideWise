@@ -10,6 +10,9 @@ def main():
     started = perf_counter()
     try:
         policies = Policies(config.DATA)
+        if not policies.ocr_ready:
+            raise SystemExit('OCR incomplete. Check OCR dependencies and retry; unsuccessful pages are not cached.')
+        print('OCR complete: all pages in PDFs 3, 4 and 5; cached by source hash, page, renderer and OCR version.')
         policies.prepare()
         if not policies.semantic_ready:
             raise SystemExit(policies.semantic_error)
