@@ -1,74 +1,178 @@
 # RideWise Assist
 
-Local read-only rental assistance using the supplied SQLite/PDF pack, the event-provided NeoStats model, and Firebase identity/role verification. FastAPI serves a fresh HTML/CSS/JavaScript workspace with live tool routing and inspectable SQL, original policy pages, and deterministic calculation evidence.
+RideWise Assist is a read-only rental support application built for the NeoStats AI Hackathon. Customers can ask about their bookings, payments and policies; support staff can investigate operational records and view dashboards. Answers include the executed SQL, the original PDF pages used, or calculation evidence so that the result can be checked.
 
-## Setup (under 10 minutes with accounts/configuration already available)
+The application uses **FastAPI, HTML/CSS/JavaScript, SQLite, Firebase Authentication, local Qdrant semantic retrieval and the NeoStats-provided generative model**. It preserves the supplied database and PDFs.
+
+## What is implemented
+
+| Area | Behavior |
+|---|---|
+| Customer access | Own bookings only, with Upcoming, Ongoing, Past and Cancelled cards; expandable payments, refunds and damage reports |
+| Support access | Customers, Hubs & Vehicles, Bookings & Payments and Damage Reports dashboards, with server-enforced role checks |
+| Chat | Hybrid routing, visible worker progress, streamed results, role-specific suggested prompts and follow-up booking context |
+| Policies | Dedicated library linking to the five original authenticated PDFs |
+| Semantic RAG | Qdrant + local BGE embeddings; OCR for image content in PDFs 3, 4 and 5; original page citations |
+| Money | Deterministic Decimal calculations for implemented refund, late-return, battery, damage and rental rules |
+| Evidence | SQL plus bound parameters, PDF filename/page/version/hash, and calculation inputs/formulas |
+| History | User-scoped saved conversations, reopen/delete, and protection against stale responses after reset |
+| Identity | Email/password sign-in, customer sign-up, Google sign-in and password reset through Firebase |
+| City aliases | Bangalore, Bengaluru and BLR resolve to Bengaluru in customer summaries and residence-city filters |
+
+The layout takes inspiration from SKOPE, with a black, green and white visual direction inspired by NeoStats. The application code was written for this project.
+
+## Run locally
+
+The tested environment is Windows with Python 3.13.9 in the `Ecothon` Conda environment. Docker is not required. A fresh environment can be created as follows; skip creation if Ecothon already exists.
 
 ```powershell
-cd D:\NeoStatsH
+git clone https://github.com/sanmitra-b/NeoStats-RideWise.git
+cd NeoStats-RideWise
+conda create -n Ecothon python=3.13 -y
 conda activate Ecothon
 python -m pip install -r requirements.txt
-Copy-Item .env.example .env
 ```
 
-If `.env` already exists, preserve it. Set `RIDEWISE_DATA_DIR` to the unpacked supplied folder containing `ridewise.db`, all five PDFs and the dictionary. Set `NEOSTATS_BASE_URL`, `NEOSTATS_API_KEY`, `NEOSTATS_MODEL` to the exact values supplied by NeoStats. `python scripts/import_event_config.py` can import literal values and simple string substitutions from the supplied wrapper into blank event fields in the ignored `.env` without executing it or printing secrets. It preserves nonblank values.
-
-Configure Firebase Authentication: register a web app, enable Email/Password if using regular accounts, add `localhost` to authorized domains, and put its public web fields in `.env`. Set `GOOGLE_APPLICATION_CREDENTIALS` to a private Admin service-account JSON path outside Git. Set `FIREBASE_PROJECT_ID`. Firebase setup is a prerequisite; no authentication bypass is enabled. No customer dataset is uploaded to Firebase or Firestore.
-
-The app includes **Sign in**, **Create account**, **Continue with Google**, and password reset. Email/password credentials are chosen by the user during sign-up; regular customers have no default password. The administrator provisions the evaluator account separately; its password is never stored in this repository. Enable Google under Firebase Authentication → Sign-in method → Google and choose the project support email. Google sign-in creates an account on its first successful use. Both email and Google registrations receive Customer through the authenticated backend bootstrap; the browser cannot submit a role or customer ID. Existing staff/evaluator assignments are preserved.
-
-Use Chrome or Edge for the Google popup and allow popups for the local app. The in-app browser's Google flow timed out during verification; a completed Google account sign-in is not claimed. Email sign-up uses the Firebase SDK directly. Customer passwords are entered through Firebase; the evaluator password was configured separately by the administrator and is never recorded in this repository. `python scripts/check_signup.py` verifies default Customer assignment and blocked self-elevation with a disposable Firebase identity, then removes only that test identity.
-
-New Customers initially get **policy access**. Their sign-in is not automatically matched to supplied customer emails or an arbitrary chosen ID. An administrator must verify ownership and link the UID to an existing RideWise customer record. Personal-record tools deny access until linked; the provided database remains unchanged. The UID is shown in Session & access and Firebase Console → Authentication → Users.
-
-Assign trusted roles with the operator CLI. Use the existing user's UID from Firebase Authentication:
+Create the local configuration without overwriting an existing file:
 
 ```powershell
-python scripts/provision_identity.py --uid FIREBASE_UID --role customer --customer-id CUST0001
-python scripts/provision_identity.py --uid STAFF_UID --role support_agent
-python scripts/provision_identity.py --uid hackathon-evaluator --role evaluator
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 ```
 
-The CLI uses the Firebase Admin SDK to set the `role` custom claim and maintains the private local UID/customer mapping. Firebase Console's Users screen does not directly assign these application roles. To make a support executive, run the `--role support_agent` command from this trusted backend machine; then have the user sign out and sign back in to refresh claims. There is no public support-role selector or promotion endpoint. Keep Admin credentials private. Regular users automatically enter their assigned session; only the evaluator selects a narrower role.
+Edit `.env` for this machine. The example contains the original developer's `D:/NeoStatsH` paths; replace them if your checkout or source pack is elsewhere.
 
-For evaluator access, use the normal email/password Sign in form with the administrator-provided credentials. The evaluator can select Customer + ID or Support Agent. Regular principals cannot select an elevated role or another customer ID. There is no custom-token login field or token-generation option. Firebase refreshes the active session automatically; reloading clears its in-memory identity. Backend verification permits 30 seconds of laptop clock drift while retaining signature, audience and revocation checks.
+| Variable | Value to supply |
+|---|---|
+| `RIDEWISE_DATA_DIR` | Folder containing the original `ridewise.db`, five policy PDFs and data dictionary |
+| `NEOSTATS_BASE_URL`, `NEOSTATS_API_KEY`, `NEOSTATS_MODEL` | Exact event-provided endpoint, key and model |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_APP_ID` | Registered Firebase web app configuration |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Absolute path to a private Firebase Admin service-account JSON |
+| `CUSTOMER_MAPPING_FILE` | Private UID/customer mapping path; use this checkout's `secrets/customer_mapping.json` |
+| `NEOSTATS_EMBEDDING_MODEL` | Leave blank for the local embedding setup, unless NeoStats supplies an embedding model |
 
-`python scripts/check_firebase.py` prompts for the evaluator email and hidden password, verifies its Firebase role, checks both narrowed sessions, cross-customer denial, authenticated streaming and original PDF access. It prints only check results and does not consume model quota.
+The supplied policy filenames must remain:
+
+```text
+01_Rental_Agreement_and_Terms.pdf
+02_Cancellation_and_Refund_Policy_v1.pdf
+03_Cancellation_and_Refund_Policy_v2.pdf
+04_Late_Return_and_Damage_Penalty_Schedule.pdf
+05_EV_User_Guide_and_FAQ.pdf
+```
+
+Keep the provided pack and credentials outside the tracked repository. The data is not bundled in this submission. `scripts/import_event_config.py` can import event settings from the supplied wrapper into blank `.env` fields without executing the wrapper or printing its secrets; existing nonblank values are preserved.
+
+Configure Firebase as described below, then prepare the sources and index with the app stopped:
 
 ```powershell
 python scripts/check_sources.py
+python scripts/build_policy_index.py
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000 . Alternatively run `./Start-RideWise.ps1` to use Ecothon directly. New conversation clears booking context/history and invalidates late streamed answers. Stop aborts the active request. Sign out clears server session and browser identity. Source PDFs open through authenticated requests; no database/file directory is exposed. Avoid `--reload` for the final demo because it discards in-memory sessions.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). `Start-RideWise.ps1` is an optional shortcut for the original Windows installation; it tries the original Ecothon Python path and otherwise uses `python`.
 
-## Architecture
+First embedding use needs internet to download the model. OCR models run locally, and successful OCR, embeddings and vectors are cached under ignored `derived/` folders. On the development laptop, the first OCR/index build took about 50 seconds; a cached rebuild took about four seconds. These are observations, not installation-time guarantees.
 
-```mermaid
-flowchart LR
- UI[HTML CSS JS] --> AUTH[Firebase ID token + assigned role]
- AUTH --> ROUTER[Bounded typed router]
- ROUTER --> SQL[Scoped operational SQLite projection]
- ROUTER --> PII[Separate private profile store]
- ROUTER --> PDF[PDF text + hash-bound visual reviews]
- SQL --> CALC[Decimal policy calculations]
- PDF --> CALC
- CALC --> E[Evidence bundle]
- PII --> E
- SQL --> E
- PDF --> E
- E --> MODEL[NeoStats explanation]
- MODEL --> VERIFY[Citation and numeric checks]
- VERIFY --> UI
+Run one backend process. Do not use multiple Uvicorn workers or run the index builder concurrently against the same local Qdrant store. Avoid `--reload` during the demo because restarts discard active sessions.
+
+## Firebase setup and roles
+
+Register a Firebase web app, enable Email/Password and Google as required, choose the Google provider support email, and add `localhost` and any other development hostnames you use to authorized domains. Keep the Admin JSON private. The browser uses the public web configuration; the server uses Admin credentials to verify identity and trusted custom claims.
+
+New email or Google accounts receive **Customer** through the authenticated backend bootstrap. There is no public role-promotion endpoint. Registration does not create or modify supplied customer records. New accounts initially have policy access until an administrator verifies ownership and links their UID to an existing customer.
+
+Use the UID from Firebase Authentication → Users. On the trusted backend machine:
+
+```powershell
+python scripts/provision_identity.py --uid CUSTOMER_UID --role customer --customer-id CUST0001
+python scripts/provision_identity.py --uid STAFF_UID --role support_agent
+python scripts/provision_identity.py --uid EVALUATOR_UID --role evaluator
 ```
 
-Workers are bounded modules, not separate model instances. Visible events report real execution. Normal requests use at most two model calls: typed planning and evidence explanation. Exact booking lookups, profile queries and calculations have deterministic paths. No alternative generative provider/model is used during outages; the app shows source facts/excerpts or a clear unavailable state. No arbitrary model SQL runs. Typed fields/operations compile to parameterized queries with scoped in-memory data, read-only handles, query deadlines and row caps. Analytics aggregates payments before joining bookings to avoid multiplying instalments; full scoped totals are calculated before display caps. Revenue excludes GST, deposits, penalties and refunds; utilization is completed rental hours, not a capacity percentage.
+These commands assign the `role` Firebase custom claim and maintain the private local customer mapping. The Firebase Users screen does not directly assign this application's roles. Sign out and back in after role or mapping changes.
 
-The `customers` table lives only in the protected profile path. General tools see operational records plus tier/KYC attributes, never full names, phone, email, birth dates or licence numbers. Customers get only their records. Support gets operational facts and explicit one-customer profile/contact lookup; staff contact values are masked. Raw contact fields never enter a model prompt. Same-process isolation is a deliberate hackathon boundary, not an OS security sandbox.
+Regular users enter their assigned role. The evaluator can select a narrower Customer session with an existing customer ID or a Support Agent session. Even an evaluator in Customer mode cannot call support dashboard endpoints. Evaluator sign-in uses administrator-provided email/password credentials; no passwords, bearer tokens or Admin keys are included in the repository. There is no custom-token login field.
 
-Original pack files are read only. `scripts/check_sources.py` stores an ignored SHA-256 baseline. Reviewed scan transcriptions and policy rules are bound to source hashes; changed financial policies block calculation until reviewed. All timestamps are UTC, money is INR/Decimal. Cancellation version is chosen by booking creation, cutoff `2026-06-30 18:30:00 UTC`. The signed v2 annexure overrides vague introductory wording. A calculated entitlement is compared with successful negative refund entries; deposit gateway returns are unavailable. Open/disputed damage is not a confirmed charge.
+Use Chrome or Edge and allow popups for Google sign-in. Successful end-to-end Google sign-in was not verified in the in-app browser. Firebase and event-provider connectivity must be tested on the evaluator's machine; local configuration flags alone do not establish external connectivity.
 
-## Verify
+## Suggested demo
+
+1. Sign in as the evaluator and start a Customer session linked to a supplied customer ID. Show My Bookings and expand a booking's payments and claims.
+2. Ask `Show my bookings`, then ask about the refund or charges for a booking returned by the data. Inspect SQL, policy pages and calculation evidence.
+3. Ask `How do I charge an EV?` and open the original cited PDF. Explain that figure text is included through OCR and reviewed transcriptions.
+4. Start a Support Agent session. Ask `List customer count by tier`; this counts customer rows, not booking rows. Ask `Count bookings by hub` to show booking analytics.
+5. Open the dashboards. The Bengaluru filter combines Bangalore, BLR and Bengaluru variants without changing the source database.
+6. Start a New conversation to show role-specific prompts. Reopen a saved conversation to demonstrate user-scoped history and retained evidence.
+
+Use actual IDs from displayed records for booking-specific questions. A request without an applicable booking or supported filter may ask for clarification. The app never executes a cancellation or transfers money.
+
+## Architecture and safeguards
+
+```mermaid
+flowchart TD
+    UI[HTML / CSS / JavaScript] --> AUTH[Firebase identity and server role checks]
+    AUTH --> ROUTER[Deterministic rules + validated model plan]
+    ROUTER --> SQL[Scoped operational SQL tools]
+    ROUTER --> PRIVATE[Protected profiles and customer summaries]
+    ROUTER --> RAG[Qdrant policy retrieval]
+    PDF[Original PDFs] --> TEXT[Native text + reviewed figures + local OCR]
+    TEXT --> EMBED[BGE / FastEmbed]
+    EMBED --> RAG
+    SQL --> CALC[Decimal calculations with reviewed rules]
+    PDF --> CALC
+    SQL --> EVIDENCE[SQL / PDF / calculation evidence]
+    PRIVATE --> EVIDENCE
+    RAG --> EVIDENCE
+    CALC --> EVIDENCE
+    EVIDENCE --> ANSWER[Deterministic output or NeoStats explanation]
+    ANSWER --> VERIFY[Citation and numeric provenance checks]
+    VERIFY --> UI
+```
+
+The workers are bounded modules, not independent autonomous model instances. Visible routing events describe actual execution. Recognizable requests use local rules; other questions use the supplied model to select a typed operation. The model never supplies arbitrary SQL for execution. SQL is compiled from code-owned templates with parameter binding, scope checks, deadlines and row caps.
+
+The supplied SQLite file is opened read-only and immutable. General chat tools use a scoped in-memory operational projection, with only customer ID, tier, KYC and canonical residence city as customer attributes. Full customer records stay in the protected private path. Support-directory names are masked, and phone, email, birth date and licence number are excluded. Contact lookups require one customer; private contact fields do not enter model prompts. This is same-process separation, not a separate PII security service.
+
+Customer counts have their own support-only operation, grouped by tier, KYC or city. Booking analytics aggregate payment rows before joining to prevent inflated counts. Revenue means successful BOOKING base excluding GST, deposits, refunds and penalties. Utilization means completed rental hours rather than a capacity percentage.
+
+Only the supplied NeoStats generative endpoint is used. An outage does not trigger another provider. Direct facts and implemented calculations can still be returned; semantic-search failure is explicit. Generated claims are checked for known citations and numeric provenance, with source facts/excerpts used if validation fails. This is not a proof of semantic correctness.
+
+## RAG and OCR settings
+
+| Setting | Implementation |
+|---|---|
+| Embedding model | `BAAI/bge-small-en-v1.5`, FastEmbed, 384 dimensions, ONNX CPU |
+| Chunking | Up to 220 whitespace-delimited words, 40-word overlap, confined to a page/extraction segment |
+| Retrieval | Top eight chunks by cosine similarity, filtered by policy topic |
+| Current corpus | 28 passages from 11 original PDF pages |
+| OCR | RapidOCR + PyMuPDF at 240 DPI on all seven pages of PDFs 3, 4 and 5 |
+| Citations | Original filename, page, version, hash and extraction method |
+| Caching | OCR keyed by source/page/DPI/engine versions; vectors fingerprinted by content, sources and embedding configuration |
+
+Native/reviewed passages and OCR passages are chunked separately. Related reviewed annexures supplement retrieval. OCR can misread numbers or table relationships, so hash-reviewed financial transcriptions remain authoritative. OCR recognition confidence is not answer confidence; cosine similarity is not factual confidence. Customer records and conversations are never embedded into Qdrant.
+
+The briefing's embedding FAQ permits a local open-source embedding model when no event model is supplied. If an event embedding model is configured, the app uses the supplied endpoint and does not silently fall back to local embeddings on failure. Financial calculations select the applicable policy deterministically rather than relying on the nearest vector match.
+
+## Financial interpretation and time
+
+Calculations use Decimal and separate base amounts, GST, deposits, assessed charges and recorded payments. Refund policy version depends on booking creation, with the v2 cutoff at `2026-06-30 18:30:00 UTC` (1 July 2026 midnight IST). The reviewed signed schedule governs refund bands. Gold grace is inclusive at 30 minutes; beyond grace, full lateness is charged in begun hours. Exactly 10% battery does not attract the below-10% fee. Only CHARGED damage is counted as a confirmed damage charge.
+
+Refund entries are negative in the supplied records. Calculated entitlement is compared with successful recorded refunds, not treated as proof of gateway settlement. Deposit gateway returns are absent from this dataset. Rental results are scheduled estimates, not evidence that payment occurred. Source-hash changes block affected financial calculations pending review.
+
+Stored timestamps are UTC. Booking cards and dashboard timestamps display IST. Dashboard date filters apply to scheduled pickup over the selected IST days. Raw SQL evidence can retain UTC and labels it accordingly. Chat monthly analytics currently group by the stored UTC month. City filters refer to customer residence, not a vehicle hub.
+
+## History and interface behavior
+
+Saved conversations are stored in ignored `derived/chat_history.db`, separately from the source database. Reads, reopening and deletion are restricted by Firebase UID and current access. Saved answers retain SQL/PDF/formula evidence and worker events. No customer dataset or history is uploaded to Firestore.
+
+New conversation resets active context while preserving earlier saved chats and restoring suggested prompts. Stop aborts an active request. Reset generations prevent late responses from appearing in a new conversation. Sign-out clears visible identity and content. History survives restarts on this backend computer; active sessions do not. Browser identity uses in-memory Firebase persistence, so reload requires signing in again. The top Session button controls access; the duplicate sidebar control was removed.
+
+The Formula evidence tab explains implemented financial calculations; ordinary record and policy answers may have no calculation evidence. It does not execute payments or modify data.
+
+## Verification
+
+The latest regression run passed **84 tests**. Coverage includes ownership and role enforcement, the customer-count routing fix, city aliases, query binding, aggregation fanout, refund boundaries, grace/battery rules, policy hashes, semantic paraphrases, real OCR ingestion, cache invalidation, history isolation and stale-response protection.
 
 ```powershell
 python -m pytest -q
@@ -76,44 +180,25 @@ python -m pip check
 python scripts/check_sources.py
 ```
 
-Tests cover refund cutoffs/bands, instalments, tier grace, EV boundaries, damage status, aggregate fanout, cross-customer/role controls, query injection binding, missing authentication, UID/reset isolation, duplicate requests, authenticated stream/PDF handlers, scan provenance, changed policies and invalid generated values. Automated tests disable live provider calls and use controlled principals; they do not claim live Firebase verification. Manually test the evaluator's two roles and original PDF opening once Firebase is configured. Run an unseen general-language question once event model configuration is available.
+Automated tests disable live generative calls and isolate history/vector stores. They do not prove live Firebase or event-provider connectivity. JavaScript syntax has also been checked; original source hashes match the baseline.
 
-## Submission and limits
-
-Submit this Git repository with its complete commit history, README, DECISIONS and `.env.example`. Keep `.env`, credentials, tokens, local mapping and supplied pack out of Git. Evaluators need their supplied pack and event/Firebase configuration. The app never changes bookings or issues refunds. Register the required Firebase app before the demo; account creation/network availability cannot be guaranteed inside the 10-minute local installation budget. Commit during the event and follow organiser announcements; the application cannot establish event timing or guarantee regulatory/organiser compliance on its own.
-
-Saved conversation history is stored separately in ignored `derived/chat_history.db`, never in the supplied `ridewise.db` or Firebase/Firestore. Access requires a verified Firebase UID and the current permitted role/customer scope. New conversation preserves the earlier chat; reopening restores the original scope, booking context, answers, SQL/PDF/formula evidence and routing events. History is available in the sidebar and the History button on smaller screens. Sign-out clears browser content while saved history remains on this backend computer. Users can delete their saved conversations. History survives backend restarts; retain the private derived database when moving the app. Existing conversations from before this feature cannot be recovered. Conversations are not automatically shared across separate backend installations.
-
-
-## Semantic policy RAG
-
-Policy retrieval uses persistent **Qdrant local mode** and **FastEmbed BAAI/bge-small-en-v1.5**, a 384-dimensional CPU embedding model. Policy text and reviewed visual transcriptions are split within each page into 220-word passages with 40-word overlap. The question is embedded and Qdrant ranks the top eight passages using cosine similarity, filtered by permitted policy topic. Passages are grouped back into original PDF-page citations. Related reviewed annexures supplement the semantic hits; refund calculations still select the correct policy version deterministically by booking creation time.
-
-The current pack produces 28 passages from 11 pages after OCR ingestion. Native/reviewed text and OCR text are chunked independently. Only supplied policy content is embedded: no customer records, PII or chat history enter Qdrant. The vector store is ignored `derived/qdrant/`; downloaded model files are ignored `derived/embedding_models/`. Source hashes, passage content, model and index schema determine the collection fingerprint, so changed documents cannot reuse a stale index. Complete indexes are reused across restarts. Local mode supports one backend process; launch without multiple Uvicorn workers or a separate concurrent index builder.
-
-The brief's embedding FAQ allows an open-source local embedding model when no event embedding model is supplied. If NeoStats supplies one, set `NEOSTATS_EMBEDDING_MODEL` to its exact name; embeddings then use the same provided HTTPS endpoint/key. A configured event embedding failure does not fall back to a different provider or local model. Generative answers always use the supplied NeoStats model.
-
-After installing requirements, prepare the model and index before the demo:
+Useful optional live checks:
 
 ```powershell
-python scripts/build_policy_index.py
+python scripts/check_firebase.py
+python scripts/check_signup.py
 ```
 
-Run this with the app stopped. First use requires internet for the model download; subsequent local inference uses cached files. Automatic startup also prepares the index. On this laptop the model download/warmup took about 11 seconds and indexing about 3 seconds; other machines and connections may differ. If embedding setup fails, database lookups and deterministic calculations remain usable, and semantic policy questions report an explicit unavailable state. `/health` exposes `semantic_ready`. PDF evidence displays the embedding model, cosine similarity and passage IDs; similarity is a retrieval ranking, not an answer-confidence percentage. The reviewed-annexure supplements are labelled separately. No keyword retrieval is silently substituted.
+`check_firebase.py` prompts for evaluator credentials and checks authentication, scope and protected handlers without consuming model quota. `check_signup.py` creates a disposable Firebase test identity, checks default Customer assignment and blocked self-elevation, then removes that identity. These are optional administrative checks, not prerequisites for ordinary app use.
 
+The [health endpoint](http://127.0.0.1:8000/health) exposes source/configuration readiness, `ocr_ready` and `semantic_ready`. Check both OCR and semantic readiness before the demo. OCR status confirms extraction returned text, not that every visual region was interpreted correctly.
 
-## Policy library, My Bookings and support dashboards
+## Limitations and submission contents
 
-The workspace has dedicated `/policies`, `/bookings` and `/dashboard` screens, accessible from the sidebar and the mobile page selector. The policy library links to the five original authenticated PDFs. My Bookings is visible only in Customer sessions and shows Upcoming, Ongoing, Past (completed/no-show) and Cancelled cards. Each card expands to recorded payments, separate GST, negative refunds and damage claim status. Unlinked accounts cannot retrieve booking data.
+The bounded query catalogue cannot answer every unseen analytical request. There is no reranker, similarity cutoff, token-aware/table-aware chunk splitter or formal claim-entailment validator. OCR can misread scans and cannot infer unlabeled graphical meaning. The current tests cover selected cases rather than every possible question.
 
-Only a Support Agent session can use Customers, Hubs & Vehicles, Bookings & Payments and Damage Reports dashboards. These are fixed parameterized SQL queries, with filters, full filtered summaries and paginated tables (100 rows). Customer names are masked; phone, email, birth date and licence number are absent from both responses and SQL evidence. Customer rows drill into that customer's bookings. Vehicle groups expand by hub → type → model and indicate vehicles with ONG records. Booking/payment filters use EXISTS so multiple transactions cannot multiply booking counts. Monetary summaries remain separated by payment type and status, with amount excluding GST and GST in separate columns. No refunds/deposits/penalties are blindly netted into rental revenue. Damage descriptions require an explicit report lookup; assessed amounts are not labelled as paid penalties.
+This is a single-backend local deployment. Sessions are in memory, history is not synchronized across installations, and there is no production audit/retention system or separate PII service. Firebase/provider setup, connectivity and model download time are external dependencies. The app cannot verify real payment settlement or holiday-aware refund processing from the supplied data.
 
-All timestamp displays use Asia/Kolkata (IST). Booking date filters apply to scheduled pickup in IST, translated to UTC on the server; the end date includes the entire selected IST day. Commissioned dates remain calendar dates. Each dashboard and expanded detail exposes executed SQL evidence.
+The GitHub submission contains source code, dependency pins, `.env.example`, setup scripts, tests, this README, [DECISIONS.md](DECISIONS.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [UI_SPECIFICATION.md](UI_SPECIFICATION.md), with the implementation commit history. DECISIONS.md describes current choices and limitations in detail; older planning proposals should not be treated as delivered functionality.
 
-Data endpoints require both the Firebase bearer ID token and `session_id` query parameter. Server dependencies recheck UID ownership, current assigned access and the effective session role before any dashboard query. Even an evaluator in a Customer session receives 403 on support endpoints; another UID cannot reuse the session ID. Routes: `/api/my/bookings?tab=upcoming|ongoing|past|cancelled`, `/api/my/bookings/{booking_id}`, `/api/dashboard/customers`, `/api/dashboard/hubs`, `/api/dashboard/bookings`, `/api/dashboard/bookings/{booking_id}`, `/api/dashboard/damage`, `/api/dashboard/damage/{report_id}`. The supplied SQLite database is read only; these screens never modify bookings, payments or claims.
-
-
-OCR revision: PDFs 3, 4 and 5 are rendered at 240 DPI and processed locally with RapidOCR (ONNX CPU), including mixed text/image pages. OCR text enters the Qdrant embedding index with original PDF page citations. Successful OCR is cached under derived/ocr by source SHA-256, page, DPI and engine/renderer version. Health reports ocr_ready; the index build command fails if coverage is incomplete. Evidence reports OCR status and mean recognition confidence (not factual confidence). Original PDFs remain unchanged. Hash-bound reviewed visual transcriptions continue to govern financial rules because OCR can misread table cells or numbers. OCR cannot infer unlabeled graphical meaning.
-
-
-City normalization: Bangalore, Bengaluru, BLR and their casing/whitespace variants resolve to Bengaluru in the customer dashboard, city chart, filter options and typed booking/transaction analytics. Source rows are unchanged. Chat city filters mean customer residence, not pickup hub; neighborhood hub names remain distinct. See DECISIONS.md for the full engineering rationale and assumptions.
+`.env`, service-account credentials, passwords/tokens, private UID mappings, supplied datasets/PDFs, conversation stores and cached models/vectors are excluded from Git. Evaluators must provide the authorized source pack and configuration. Publishing the repository does not complete any separate organiser submission form; submit the repository link through the event's required channel.
