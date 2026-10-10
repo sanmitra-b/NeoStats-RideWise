@@ -5,6 +5,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from .models import Plan
+from .locations import canonical_city, city_sql
 
 TABLES = ('vehicles', 'bookings', 'payments', 'damage_reports')
 EXCLUDED = {'payments': {'transaction_ref', 'remarks'}, 'damage_reports': {'description'}}
@@ -88,9 +89,9 @@ def projection(path, session):
                     args = ids
             rows = original.execute(sql, args).fetchall()
             c.executemany(f'INSERT INTO {table} VALUES (' + ','.join('?' for _ in cols) + ')', [tuple(r) for r in rows])
-        c.execute('CREATE TABLE customer_attributes (customer_id TEXT, customer_tier TEXT, kyc_status TEXT)')
-        rows = original.execute('SELECT customer_id, customer_tier, kyc_status FROM customers' + (' WHERE customer_id=?' if scope else ''), [scope] if scope else []).fetchall()
-        c.executemany('INSERT INTO customer_attributes VALUES (?,?,?)', [tuple(r) for r in rows])
+        c.execute('CREATE TABLE customer_attributes (customer_id TEXT, customer_tier TEXT, kyc_status TEXT, city TEXT)')
+        rows = original.execute('SELECT customer_id, customer_tier, kyc_status,' + city_sql('city') + ' AS city FROM customers' + (' WHERE customer_id=?' if scope else ''), [scope] if scope else []).fetchall()
+        c.executemany('INSERT INTO customer_attributes VALUES (?,?,?,?)', [tuple(r) for r in rows])
     c.execute('PRAGMA query_only=ON')
     c.enable_load_extension(False)
     try:
@@ -110,7 +111,7 @@ def execute(c, sql, args, scope, cap=50):
 BASE = ' FROM bookings b JOIN vehicles v ON v.vehicle_id=b.vehicle_id LEFT JOIN customer_attributes a ON a.customer_id=b.customer_id'
 FIELDS = {f: 'b.' + f for f in ('booking_id', 'customer_id', 'vehicle_id', 'booking_status', 'scheduled_start', 'scheduled_end', 'booked_at')}
 FIELDS.update({f: 'v.' + f for f in ('hub_name', 'vehicle_type', 'model')})
-FIELDS.update({f: 'a.' + f for f in ('customer_tier', 'kyc_status')})
+FIELDS.update({f: 'a.' + f for f in ('customer_tier', 'kyc_status', 'city')})
 
 def where(plan, fields=FIELDS):
     pieces, args = [], []
@@ -119,13 +120,14 @@ def where(plan, fields=FIELDS):
         if f.field not in fields:
             raise ValueError('That filter does not apply to this operation.')
         col = fields[f.field]
+        value = canonical_city(f.value) if f.field == 'city' else f.value
         op = {'eq': '=', 'gte': '>=', 'lte': '<=', 'contains': 'LIKE'}[f.op]
         if f.op == 'contains':
             pieces.append(f"{col} LIKE ? ESCAPE '\\'")
-            args.append('%' + f.value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%')
+            args.append('%' + value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%')
         else:
             pieces.append(f'{col} {op} ?')
-            args.append(f.value)
+            args.append(value)
     for field in ('booking_id', 'customer_id'):
         value = getattr(plan, field)
         if value and field in fields:

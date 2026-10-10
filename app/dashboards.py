@@ -2,6 +2,7 @@
 from datetime import date, datetime, time, timedelta, timezone
 from fastapi import HTTPException
 from . import config, database
+from .locations import canonical_city, city_sql
 
 BOOKING_STATUSES = ('UPC', 'ONG', 'CMP', 'CNL_U', 'CNL_S', 'NSH')
 PAYMENT_TYPES = ('BOOKING', 'DEPOSIT', 'PENALTY', 'REFUND')
@@ -40,13 +41,13 @@ def customers(kyc='', tier='', city='', offset=0):
     # Customer PII is read only inside the existing protected profile store.
     with database.private_store(config.DB) as c:
         q = Queries(c, 'Support dashboard: masked customer directory; contact and identity fields excluded')
-        where, args = filters([('kyc_status', kyc), ('customer_tier', tier), ('city', city)])
+        where, args = filters([('kyc_status', kyc), ('customer_tier', tier), (city_sql('city'), canonical_city(city))])
         total = q.run('SELECT COUNT(*) AS total FROM customers' + where, args)[0]['total']
         kyc_counts = q.run('SELECT kyc_status AS label,COUNT(*) AS count FROM customers' + where + ' GROUP BY kyc_status', args)
         tiers = q.run('SELECT customer_tier AS label,COUNT(*) AS count FROM customers' + where + ' GROUP BY customer_tier', args)
-        cities = q.run('SELECT city AS label,COUNT(*) AS count FROM customers' + where + ' GROUP BY city ORDER BY count DESC', args)
-        options = q.run('SELECT DISTINCT city FROM customers ORDER BY city')
-        rows = q.run('SELECT customer_id,full_name,city,customer_tier,kyc_status,created_at FROM customers' + where + ' ORDER BY customer_id LIMIT 100 OFFSET ?', [*args, offset])
+        cities = q.run('SELECT ' + city_sql('city') + ' AS label,COUNT(*) AS count FROM customers' + where + ' GROUP BY ' + city_sql('city') + ' ORDER BY count DESC', args)
+        options = q.run('SELECT DISTINCT ' + city_sql('city') + ' AS city FROM customers ORDER BY city')
+        rows = q.run('SELECT customer_id,full_name,' + city_sql('city') + ' AS city,customer_tier,kyc_status,created_at FROM customers' + where + ' ORDER BY customer_id LIMIT 100 OFFSET ?', [*args, offset])
         for row in rows:
             row['full_name'] = mask_name(row['full_name'])
         q.evidence[-1]['redaction'] = 'Names are masked after query execution; contact and identity fields were not selected.'

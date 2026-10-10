@@ -23,7 +23,7 @@ class ChatRequest(Strict):
     request_id: str = Field(min_length=1, max_length=80, pattern=r'^[\w-]+$')
 
 class Filter(Strict):
-    field: Literal['booking_id', 'customer_id', 'vehicle_id', 'booking_status', 'hub_name', 'vehicle_type', 'model', 'status', 'customer_tier', 'kyc_status', 'scheduled_start', 'scheduled_end', 'booked_at', 'payment_status', 'payment_type', 'claim_status', 'damage_category']
+    field: Literal['booking_id', 'customer_id', 'vehicle_id', 'booking_status', 'hub_name', 'city', 'vehicle_type', 'model', 'status', 'customer_tier', 'kyc_status', 'scheduled_start', 'scheduled_end', 'booked_at', 'payment_status', 'payment_type', 'claim_status', 'damage_category']
     op: Literal['eq', 'gte', 'lte', 'contains'] = 'eq'
     value: str = Field(max_length=100)
 
@@ -33,7 +33,7 @@ class Plan(Strict):
     customer_id: str | None = Field(default=None, pattern=r'^CUST\d{4}$')
     filters: list[Filter] = Field(default_factory=list, max_length=8)
     metric: Literal['count', 'revenue', 'refunds', 'penalties', 'late_returns', 'utilization'] = 'count'
-    group_by: Literal['none', 'hub_name', 'vehicle_type', 'model', 'booking_status', 'customer_tier', 'month'] = 'none'
+    group_by: Literal['none', 'hub_name', 'city', 'vehicle_type', 'model', 'booking_status', 'customer_tier', 'month'] = 'none'
     topic: Literal['rental', 'refund', 'penalty', 'ev', 'all'] = 'all'
     clarification: str = Field(default='', max_length=400)
     profile_contact: bool = False
