@@ -28,12 +28,12 @@ class Filter(Strict):
     value: str = Field(max_length=100)
 
 class Plan(Strict):
-    operation: Literal['bookings', 'payments', 'damage', 'vehicles', 'profile', 'analytics', 'policy', 'refund', 'charges', 'rental', 'clarify', 'refuse']
+    operation: Literal['bookings', 'payments', 'damage', 'vehicles', 'profile', 'analytics', 'customer_analytics', 'policy', 'refund', 'charges', 'rental', 'clarify', 'refuse']
     booking_id: str | None = Field(default=None, pattern=r'^B-\d{4}$')
     customer_id: str | None = Field(default=None, pattern=r'^CUST\d{4}$')
     filters: list[Filter] = Field(default_factory=list, max_length=8)
     metric: Literal['count', 'revenue', 'refunds', 'penalties', 'late_returns', 'utilization'] = 'count'
-    group_by: Literal['none', 'hub_name', 'city', 'vehicle_type', 'model', 'booking_status', 'customer_tier', 'month'] = 'none'
+    group_by: Literal['none', 'hub_name', 'city', 'vehicle_type', 'model', 'booking_status', 'customer_tier', 'kyc_status', 'month'] = 'none'
     topic: Literal['rental', 'refund', 'penalty', 'ev', 'all'] = 'all'
     clarification: str = Field(default='', max_length=400)
     profile_contact: bool = False

@@ -146,6 +146,19 @@ def query(path, session, plan: Plan):
         for f in plan.filters:
             if f.field == 'customer_id' and (f.op != 'eq' or f.value != session.customer_id):
                 raise PermissionError('Other customer information is not available.')
+    if plan.operation == 'customer_analytics':
+        if session.role != 'support_agent':
+            raise PermissionError('Customer summaries are restricted to support agents.')
+        fields = {'customer_id': 'customer_id', 'customer_tier': 'customer_tier', 'kyc_status': 'kyc_status', 'city': city_sql('city')}
+        if plan.metric != 'count' or plan.group_by not in ('none', 'customer_tier', 'kyc_status', 'city') or plan.booking_id:
+            raise ValueError('Customer summaries support counts by tier, KYC status or residence city.')
+        with private_store(path) as c:
+            w, args = where(plan, fields)
+            group = fields.get(plan.group_by)
+            sql = 'SELECT ' + (group + ' AS group_value,' if group else '') + 'COUNT(*) AS value FROM customers' + w
+            if group:
+                sql += ' GROUP BY ' + group + ' ORDER BY value DESC LIMIT 51'
+            return [execute(c, sql, args, 'Support customer counts; no personal contact or identity fields')]
     evidence = []
     scope = 'Own customer records: ' + session.customer_id if session.role == 'customer' else 'Support operational records; no personal customer fields'
     with projection(path, session) as c:

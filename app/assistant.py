@@ -17,6 +17,14 @@ def local_plan(message, session):
         return Plan(operation='refuse', clarification='I can explain records and policy, but cannot change bookings, payments, or the database.')
     if re.search(r'\b(api key|system prompt|service.account|private key|password|ignore.*instructions)\b', q):
         return Plan(operation='refuse', clarification='I cannot expose credentials or bypass access rules.')
+    customer_count = bool(re.search(r'\bcustomers?\b', q) and re.search(r'\b(count|how many|number of|total)\b', q))
+    if customer_count:
+        summary = re.fullmatch(r'(?:please )?(?:(?:list|show|give me) )?(?:(?:the|total) )?(?:customer count|count customers|number of customers|how many customers)(?: (?:by|per) (?:customer )?(tier|city|kyc(?: status)?))?[?.! ]*', q.strip())
+        if summary:
+            group = {'tier': 'customer_tier', 'city': 'city', 'kyc': 'kyc_status', 'kyc status': 'kyc_status'}.get(summary[1], 'none')
+            return Plan(operation='customer_analytics', group_by=group)
+        # Let the model preserve extra filters instead of treating a summary as PII.
+        return None
     if re.search(r'\b(profile|kyc|tier|my account|my email|my phone|contact details)\b', q):
         return Plan(operation='profile', customer_id=cid, profile_contact=bool(re.search(r'\b(email|phone|contact|name)\b', q)))
     if bid and not any(term in q for term in ('count', 'how many', 'total revenue', 'by hub', 'across')):
@@ -82,7 +90,7 @@ async def answer(message, session, policies, emit, generation):
             # ignore a model-selected GROUP BY while returning record lists.
             if plan.operation in ('bookings', 'payments', 'damage') and (plan.group_by != 'none' or plan.metric != 'count' or re.search(r'\b(count|how many|number of|total bookings)\b', message, re.I)):
                 plan.operation = 'analytics'
-            elif plan.operation not in ('analytics', 'clarify', 'refuse') and (plan.group_by != 'none' or plan.metric != 'count'):
+            elif plan.operation not in ('analytics', 'customer_analytics', 'clarify', 'refuse') and (plan.group_by != 'none' or plan.metric != 'count'):
                 raise ValueError('The planned grouping does not apply to that tool. Please specify a record list or a supported aggregate.')
         if plan.operation in ('refund', 'charges', 'rental') and not plan.booking_id and session.booking_id:
             plan.booking_id = session.booking_id
@@ -98,7 +106,7 @@ async def answer(message, session, policies, emit, generation):
             evidence.append(result)
             await event('Profile', 'completed', 'Retrieved permitted profile fields', [result['id']])
         elif plan.operation != 'policy':
-            worker = 'Analytics' if plan.operation == 'analytics' else 'Booking / Payments'
+            worker = 'Analytics' if plan.operation in ('analytics', 'customer_analytics') else 'Booking / Payments'
             await event(worker, 'running', 'Executing compiled SQL over authorised records')
             evidence.extend(await asyncio.to_thread(database.query, config.DB, session, plan))
             await event(worker, 'completed', 'Retrieved permitted operational facts', [e['id'] for e in evidence])

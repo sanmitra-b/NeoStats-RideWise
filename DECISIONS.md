@@ -62,7 +62,7 @@ In chat analytics, city means the customer's residence city. It does not mean th
 
 ## 7. Routing and the meaning of agents
 
-Routing is hybrid. Explicit booking lookups, recognizable policy questions, simple booking lists and certain refusals use deterministic rules. Other questions go to the supplied model for a structured Plan. The model chooses an operation from a bounded catalogue and typed filters. It never returns SQL for direct execution.
+Routing is hybrid. Explicit booking lookups, recognizable policy questions, simple booking lists and certain refusals use deterministic rules. Other questions go to the supplied model for a structured Plan. The model chooses an operation from a bounded catalogue and typed filters. Customer counts use a separate support-only customer_analytics operation, grouped by tier, KYC status or canonical residence city. They count customer rows rather than bookings, so customers with no bookings are included and repeat bookings do not inflate counts. Recognizable customer-count requests route to it before profile keywords such as tier. Profile lookup still requires one explicit customer for support staff; aggregated counts do not expose contact records. It never returns SQL for direct execution.
 
 The visible Router, Booking/Payments, Analytics, Profile, Policy/EV Guide, Charges, Answer and Verification stages are workers in a controlled workflow. They are not independent autonomous model instances negotiating a solution. Progress events report actual selected work and evidence IDs; they do not reveal hidden reasoning.
 
