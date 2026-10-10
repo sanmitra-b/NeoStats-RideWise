@@ -17,6 +17,7 @@ Neostats Hackathon AI Usecase 3/
 *.xlsx
 *.pdf
 *.png
+!screenshots/*.png
 *.svg
 .vscode/
 Activate-Ecothon.ps1
