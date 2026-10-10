@@ -1,7 +1,9 @@
+import { WorkspacePages } from './pages.js';
 const $ = id => document.getElementById(id);
 let config, firebaseAuth, firebaseApi, principal, session, selectedEvidence = [], activeTab = 'sql', controller, busy = false, renderGeneration = 0;
 let creatingAccount = false, authBusy = false;
 const blobs = new Set();
+const pages = new WorkspacePages({api:(...args)=>api(...args), session:()=>session, login:showDialog, chat:showChat, blob:url=>blobs.add(url), evidence:list=>{selectedEvidence=list;activeTab='sql';showChat();document.body.classList.remove('drawer-closed');renderEvidence();}});
 const el = (tag, text, cls) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (cls) node.className = cls; return node; };
 const clearBlobs = () => { for (const url of blobs) URL.revokeObjectURL(url); blobs.clear(); };
 async function api(path, options = {}) {
@@ -105,7 +107,7 @@ async function startSession() {
   try {
     const role = $('role').value;
     const next = await (await api('/api/session', { method: 'POST', body: JSON.stringify({ role, customer_id: role === 'customer' ? ($('customerId').value.trim().toUpperCase() || null) : null }) })).json();
-    clearConversation(); session = next;
+    clearConversation(); session = next; pages.syncRole();
     $('scope').textContent = role === 'customer' ? (session.customer_id ? 'Customer · ' + session.customer_id : 'Customer · policy access') : 'Support agent';
     $('principalLabel').textContent = principal.role === 'evaluator' ? 'Firebase evaluator · selected role' : 'Firebase verified · assigned role';
     $('sessionDialog').close(); updateEnabled();
@@ -116,7 +118,7 @@ async function startSession() {
     for (const question of role === 'customer' ? (session.customer_id ? ['Show my bookings', 'What are the refund rules?', 'How do I charge an EV?', 'What is my KYC status?'] : ['What are the refund rules?', 'How do I charge an EV?', 'What are the late return penalties?', 'What is the deposit policy?']) : ['Count bookings by hub', 'What are the refund rules?', 'List active vehicles by hub', 'What are the late return penalties?']) {
       const b = el('button', question); b.addEventListener('click', () => sendQuestion(question)); suggestions.append(b);
     }
-    intro.append(suggestions); $('messages').append(intro); $('question').focus();
+    intro.append(suggestions); $('messages').append(intro); $('question').focus(); await pages.openPath();
   } catch (e) { $('sessionError').textContent = e.message; }
 }
 function messageNode(text, user = false) {
@@ -184,6 +186,7 @@ function renderEvidence() {
     const card = el('section', undefined, 'source-card'); card.append(el('h3', e.kind === 'pdf' ? e.filename : e.kind === 'sql' ? e.id + ' · Executed SQL' : e.title));
     const body = el('div', undefined, 'source-body'); card.append(body);
     if (e.kind === 'sql') {
+      if (e.redaction) body.append(el('p', e.redaction, 'notice'));
       body.append(el('p', e.scope), el('pre', e.sql), el('p', 'Bound parameters'), el('pre', JSON.stringify(e.parameters, null, 2)), el('p', `${e.rows.length} displayed rows · ${e.duration_ms} ms${e.truncated ? ' · limited result' : ''}`), el('pre', JSON.stringify(e.rows, null, 2)));
     } else if (e.kind === 'pdf') {
       if (e.retrieval) body.append(el('p', e.retrieval.method), el('p', 'Embedding: ' + e.retrieval.embedding_model + (e.retrieval.score !== null ? ' · Cosine similarity: ' + e.retrieval.score : '')), el('p', 'Passages: ' + (e.retrieval.chunks.join(', ') || 'Reviewed annexure')));
@@ -197,7 +200,13 @@ function renderEvidence() {
     container.append(card);
   }
 }
+function showChat(push=true) {
+  pages.version++; pages.root.classList.add('hidden'); document.body.classList.remove('page-view'); $('messages').classList.remove('hidden'); $('composerWrap').classList.remove('hidden'); $('pageTitle').textContent='Conversation'; $('pageMenu').value='chat';
+  for (const id of ['policiesNav','myBookingsNav','dashboardNav']) $(id).classList.remove('active'); $('conversationNav').classList.add('active');
+  if(push && location.pathname!=='/') history.pushState({},'', '/');
+}
 async function reset() {
+  showChat();
   if (!session) { showDialog(); return; }
   controller?.abort();
   try { const result = await (await api(`/api/conversation/${session.session_id}/reset`, { method: 'POST' })).json(); session.generation = result.generation; clearConversation(); $('question').value = ''; notice('New conversation started. Previous context and evidence cleared.'); } catch (e) { notice(e.message); }
@@ -211,21 +220,15 @@ $('sessionNav').addEventListener('click', showDialog); $('switchSession').addEve
 $('closeSession').addEventListener('click', () => $('sessionDialog').close());
 $('closeDrawer').addEventListener('click', () => document.body.classList.add('drawer-closed'));
 $('openEvidence').addEventListener('click', () => document.body.classList.toggle('drawer-closed'));
-$('conversationNav').addEventListener('click', () => { $('sessionDialog').close(); $('question').focus(); });
+$('conversationNav').addEventListener('click', () => { $('sessionDialog').close(); showChat(); $('question').focus(); });
 $('role').addEventListener('change', roleChanged); $('emailAuthForm').addEventListener('submit', e => {e.preventDefault(); login();}); $('startSession').addEventListener('click', startSession);
 $('signInTab').addEventListener('click', () => authMode(false)); $('signUpTab').addEventListener('click', () => authMode(true)); $('googleLogin').addEventListener('click', googleLogin); $('forgotPassword').addEventListener('click', forgotPassword);
 $('drawerTabs').addEventListener('click', e => { if (e.target.dataset.tab) { activeTab = e.target.dataset.tab; renderEvidence(); } });
 for (const b of document.querySelectorAll('[data-question]')) b.addEventListener('click', () => sendQuestion(b.dataset.question));
-$('policiesNav').addEventListener('click', async () => {
-  if (!session) { showDialog(); return; }
-  try {
-    const list = await (await api('/api/policies')).json(); document.body.classList.remove('drawer-closed'); activeTab = 'pdf'; selectedEvidence = list.map(p => ({ ...p, kind: 'pdf', page: 1, version: 'See original document', method: p.reviewed ? 'Hash matches reviewed source' : 'Source changed: re-review required', hash: 'Available in answer evidence', excerpt: 'Browse the original document. This catalogue does not imply a document was used in an answer.', url: '/api/policies/' + p.key })); renderEvidence();
-  } catch (e) { notice(e.message); }
-});
 async function signOut() {
   controller?.abort();
   try { if (session) await api('/api/session/' + session.session_id, { method: 'DELETE' }); } catch {}
-  await firebaseApi?.signOut(firebaseAuth); session = null; principal = null; clearConversation(); updateEnabled();
+  await firebaseApi?.signOut(firebaseAuth); session = null; principal = null; clearConversation(); pages.clear(); pages.syncRole(); showChat(); updateEnabled();
   $('historyList').replaceChildren(); $('historyDialogList').replaceChildren(); $('historyDialog').close();
   authMode(false);
   $('scope').textContent = 'Not signed in'; $('principalLabel').textContent = 'Firebase authentication'; $('authBadge').textContent = config.auth_ready ? 'Sign-in required' : 'Setup required'; $('authBadge').classList.remove('verified'); $('roleState').classList.add('hidden'); if (config.auth_ready) $('loginState').classList.remove('hidden'); showDialog();
@@ -262,7 +265,7 @@ async function resumeHistory(id) {
   if (busy) { notice('Stop the current answer before switching conversations.'); return; }
   try {
     const next = await (await api('/api/history/' + id + '/resume', {method:'POST'})).json();
-    clearConversation(); session = next;
+    clearConversation(); session = next; pages.syncRole();
     $('role').value = next.role; $('customerId').value = next.customer_id || ''; roleChanged();
     $('scope').textContent = next.role === 'customer' ? 'Customer · ' + (next.customer_id || 'policy access') : 'Support agent';
     for (const turn of next.turns) {
@@ -279,7 +282,7 @@ async function resumeHistory(id) {
       card.append(badges);
       if (turn.result.notices?.length) card.append(el('p', turn.result.notices.join('\n'), 'notice'));
     }
-    $('historyDialog').close(); $('sessionDialog').close(); updateEnabled();
+    pages.syncRole(); showChat(); $('historyDialog').close(); $('sessionDialog').close(); updateEnabled();
     $('messages').scrollTop = $('messages').scrollHeight; notice('Saved conversation restored. Continue in its original role and customer scope.');
   } catch (e) { notice(e.message); }
 }

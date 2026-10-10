@@ -2,10 +2,12 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, Query
+from typing import Literal
+from datetime import date
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from . import config, auth, database, history, semantic
+from . import config, auth, database, history, semantic, dashboards
 from .models import SessionRequest, ChatRequest, Principal, RegistrationRequest
 from .sessions import sessions
 from .policies import Policies, FILES
@@ -44,6 +46,9 @@ async def protect_origin(request: Request, call_next):
     return response
 
 @app.get('/')
+@app.get('/policies')
+@app.get('/bookings')
+@app.get('/dashboard')
 def index():
     return FileResponse(config.ROOT / 'static' / 'index.html')
 
@@ -114,6 +119,63 @@ def history_delete(conversation_id: str, p: Principal = Depends(auth.principal))
             s.history.clear()
             reset_sessions[key] = s.generation
     return {'ok': True, 'reset_sessions': reset_sessions}
+
+def active_session(session_id: str = Query(min_length=1, max_length=100), p: Principal = Depends(auth.principal)):
+    return sessions.get(session_id, p)
+
+def support_session(s = Depends(active_session)):
+    if s.role != 'support_agent':
+        raise HTTPException(403, 'Support Agent session required for dashboards.')
+    return s
+
+def customer_session(s = Depends(active_session)):
+    if s.role != 'customer':
+        raise HTTPException(403, 'Customer session required for My Bookings.')
+    if not s.customer_id:
+        raise HTTPException(403, 'Your RideWise customer record must be linked by an administrator.')
+    return s
+
+@app.get('/api/my/bookings')
+def my_bookings(tab: Literal['upcoming','ongoing','past','cancelled'] = 'upcoming', s = Depends(customer_session)):
+    return dashboards.own_bookings(s.customer_id, tab)
+
+@app.get('/api/my/bookings/{booking_id}')
+def my_booking_details(booking_id: str, s = Depends(customer_session)):
+    return dashboards.booking_detail(booking_id, s.customer_id)
+
+@app.get('/api/dashboard/customers')
+def dashboard_customers(kyc: Literal['','VERIFIED','PENDING','REJECTED'] = '',
+    tier: Literal['','GOLD','SILVER','STANDARD'] = '', city: str = Query('', max_length=100),
+    offset: int = Query(0, ge=0, le=100000), s = Depends(support_session)):
+    return dashboards.customers(kyc, tier, city, offset)
+
+@app.get('/api/dashboard/hubs')
+def dashboard_hubs(hub: str = Query('', max_length=100), s = Depends(support_session)):
+    return dashboards.hubs(hub)
+
+@app.get('/api/dashboard/bookings')
+def dashboard_bookings(status: Literal['','UPC','ONG','CMP','CNL_U','CNL_S','NSH'] = '',
+    start: date | None = Query(None, alias='from'), end: date | None = Query(None, alias='to'),
+    hub: str = Query('', max_length=100), payment_type: Literal['','BOOKING','DEPOSIT','PENALTY','REFUND'] = '',
+    payment_status: Literal['','SUCCESS','FAILED','PENDING'] = '',
+    customer_id: str | None = Query(None, pattern=r'^CUST\d{4}$'),
+    offset: int = Query(0, ge=0, le=100000), s = Depends(support_session)):
+    return dashboards.bookings(status, start, end, hub, payment_type, payment_status, customer_id or '', offset)
+
+@app.get('/api/dashboard/bookings/{booking_id}')
+def dashboard_booking_details(booking_id: str, s = Depends(support_session)):
+    return dashboards.booking_detail(booking_id)
+
+@app.get('/api/dashboard/damage')
+def dashboard_damage(claim_status: Literal['','OPEN','CHARGED','WAIVED','DISPUTED'] = '',
+    category: Literal['','SCRATCH','DENT','TYRE','BATTERY','LOST_KEY','OTHER'] = '',
+    severity: Literal['','LOW','MEDIUM','HIGH'] = '', offset: int = Query(0, ge=0, le=100000),
+    s = Depends(support_session)):
+    return dashboards.damage(claim_status, category, severity, offset)
+
+@app.get('/api/dashboard/damage/{report_id}')
+def dashboard_damage_details(report_id: str, s = Depends(support_session)):
+    return dashboards.damage_detail(report_id)
 
 @app.get('/api/policies')
 def policy_list(p: Principal = Depends(auth.principal)):

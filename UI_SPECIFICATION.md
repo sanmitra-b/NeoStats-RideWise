@@ -120,3 +120,8 @@ Implement the shell and session controls first, then one verified answer/evidenc
 UI passes when the verified evaluator can use either role, start/reset a conversation, see real routed workers, inspect the actually executed SQL/PDF behind every substantive answer, and switch sessions without old evidence appearing. Test desktop and a narrow viewport once after final UI changes.
 
 References: [SKOPE workspace pattern](https://github.com/sanmitra-b/SKOPE), [NeoStats visual reference](https://www.neostats.ai/), [Firebase custom authentication](https://firebase.google.com/docs/auth/web/custom-auth), [ID-token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens), [claims and server enforcement](https://firebase.google.com/docs/auth/admin/custom-claims), and [in-memory authentication persistence](https://firebase.google.com/docs/auth/web/auth-state-persistence).
+
+
+## Implemented workspace pages
+
+Policy sources now opens a dedicated policy library with original PDF links. Customer sessions add My Bookings with Upcoming/Ongoing/Past/Cancelled cards and expandable payments, GST, refunds and damage statuses. Support Agent sessions add the four-tab dashboard: Customers, Hubs & Vehicles, Bookings & Payments, Damage Reports. Keep the black sidebar, green accents and white cards. Use masked customer names, IST timestamp labels, separate money/GST columns, meaningful empty/error states, filtering and pagination, and inspectable SQL. Expose the page selector in the header for mobile users. Dashboard permission comes from the effective server-checked session, including evaluator-selected roles. Switching roles or signing out clears prior page data.
