@@ -192,13 +192,3 @@ python scripts/check_signup.py
 `check_firebase.py` prompts for evaluator credentials and checks authentication, scope and protected handlers without consuming model quota. `check_signup.py` creates a disposable Firebase test identity, checks default Customer assignment and blocked self-elevation, then removes that identity. These are optional administrative checks, not prerequisites for ordinary app use.
 
 The [health endpoint](http://127.0.0.1:8000/health) exposes source/configuration readiness, `ocr_ready` and `semantic_ready`. Check both OCR and semantic readiness before the demo. OCR status confirms extraction returned text, not that every visual region was interpreted correctly.
-
-## Limitations and submission contents
-
-The bounded query catalogue cannot answer every unseen analytical request. There is no reranker, similarity cutoff, token-aware/table-aware chunk splitter or formal claim-entailment validator. OCR can misread scans and cannot infer unlabeled graphical meaning. The current tests cover selected cases rather than every possible question.
-
-This is a single-backend local deployment. Sessions are in memory, history is not synchronized across installations, and there is no production audit/retention system or separate PII service. Firebase/provider setup, connectivity and model download time are external dependencies. The app cannot verify real payment settlement or holiday-aware refund processing from the supplied data.
-
-The GitHub submission contains source code, dependency pins, `.env.example`, setup scripts, tests, this README, [DECISIONS.md](DECISIONS.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [UI_SPECIFICATION.md](UI_SPECIFICATION.md), with the implementation commit history. DECISIONS.md describes current choices and limitations in detail; older planning proposals should not be treated as delivered functionality.
-
-`.env`, service-account credentials, passwords/tokens, private UID mappings, supplied datasets/PDFs, conversation stores and cached models/vectors are excluded from Git. Evaluators must provide the authorized source pack and configuration. Publishing the repository does not complete any separate organiser submission form; submit the repository link through the event's required channel.
