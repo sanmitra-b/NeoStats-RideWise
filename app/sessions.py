@@ -23,7 +23,7 @@ class Sessions:
     def create(self, p: Principal, role, cid):
         if p.role != 'evaluator' and (role != p.role or cid != p.customer_id):
             raise HTTPException(403, 'This session is outside your assigned access.')
-        if role == 'customer' and not cid:
+        if p.role == 'evaluator' and role == 'customer' and not cid:
             raise HTTPException(422, 'Enter a customer ID.')
         for key, session in list(self.items.items()):
             if session.uid == p.uid or monotonic() - session.touched > 3600:

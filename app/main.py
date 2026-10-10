@@ -6,7 +6,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from . import config, auth, database
-from .models import SessionRequest, ChatRequest, Principal
+from .models import SessionRequest, ChatRequest, Principal, RegistrationRequest
 from .sessions import sessions
 from .policies import Policies, FILES
 from .provider import provider
@@ -36,7 +36,9 @@ async def protect_origin(request: Request, call_next):
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'no-referrer'
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' https://www.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com; style-src 'self'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com; style-src 'self'; img-src 'self' data:; frame-src 'self' https://ridewise-8984a.firebaseapp.com; base-uri 'none'; frame-ancestors 'none'"
+    # Popup authentication needs an opener relationship to its Google/Firebase window.
+    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin-allow-popups'
     return response
 
 @app.get('/')
@@ -55,12 +57,18 @@ def public_config():
 def me(p: Principal = Depends(auth.principal)):
     return p
 
+@app.post('/api/account/bootstrap')
+async def bootstrap(body: RegistrationRequest, claims: dict = Depends(auth.identity)):
+    return await asyncio.to_thread(auth.register_customer, claims)
+
 @app.post('/api/session')
 async def start_session(body: SessionRequest, p: Principal = Depends(auth.principal)):
     # Permission check before existence check: do not reveal another customer's existence.
     if p.role != 'evaluator' and (body.role != p.role or body.customer_id != p.customer_id):
         raise HTTPException(403, 'This session is outside your assigned access.')
-    if body.role == 'customer' and (not body.customer_id or not await asyncio.to_thread(database.customer_exists, config.DB, body.customer_id)):
+    if body.role == 'customer' and not body.customer_id and p.role == 'evaluator':
+        raise HTTPException(422, 'Enter a customer ID for evaluation.')
+    if body.role == 'customer' and body.customer_id and not await asyncio.to_thread(database.customer_exists, config.DB, body.customer_id):
         raise HTTPException(422, 'Customer ID is not available for this session.')
     key, s = sessions.create(p, body.role, body.customer_id if body.role == 'customer' else None)
     return {'session_id': key, 'generation': s.generation, 'role': s.role, 'customer_id': s.customer_id, 'principal_role': p.role}

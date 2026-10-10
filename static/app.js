@@ -1,5 +1,6 @@
 const $ = id => document.getElementById(id);
 let config, firebaseAuth, firebaseApi, principal, session, selectedEvidence = [], activeTab = 'sql', controller, busy = false, renderGeneration = 0;
+let creatingAccount = false, authBusy = false;
 const blobs = new Set();
 const el = (tag, text, cls) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (cls) node.className = cls; return node; };
 const clearBlobs = () => { for (const url of blobs) URL.revokeObjectURL(url); blobs.clear(); };
@@ -32,52 +33,87 @@ async function init() {
   if (!config.auth_ready) { showDialog(); return; }
   $('setupState').classList.add('hidden'); $('loginState').classList.remove('hidden');
   $('authBadge').textContent = 'Sign-in required'; notice('Sign in to start a permitted customer or staff session.');
+  setAuthBusy(true);
   try {
     const [core, authModule] = await Promise.all([import('https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js'), import('https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js')]);
     firebaseApi = authModule; firebaseAuth = authModule.getAuth(core.initializeApp(config.firebase));
     await authModule.setPersistence(firebaseAuth, authModule.inMemoryPersistence);
     showDialog();
   } catch { $('sessionError').textContent = 'Firebase could not load. Check your connection and web configuration.'; showDialog(); }
+  finally { setAuthBusy(false); }
 }
 async function signedIn() {
+  await api('/api/account/bootstrap', { method: 'POST', body: '{}' });
+  await firebaseAuth.currentUser.getIdToken(true);
   principal = await (await api('/api/me')).json();
   $('password').value = ''; $('customToken').value = '';
   $('loginState').classList.add('hidden'); $('roleState').classList.remove('hidden');
-  $('identity').textContent = 'Assigned role: ' + principal.role.replaceAll('_', ' ');
+  $('identity').textContent = 'Assigned role: ' + principal.role.replaceAll('_', ' ') + ' · Account UID: ' + principal.uid;
   const evaluator = principal.role === 'evaluator';
   $('role').disabled = !evaluator; $('customerId').disabled = !evaluator;
   $('role').value = evaluator ? 'customer' : principal.role;
   $('customerId').value = principal.customer_id || '';
-  $('evaluationLabel').textContent = evaluator ? 'Evaluator privileges: select a narrower role for this session.' : 'Your customer scope and role are assigned by the server.';
+  $('evaluationLabel').textContent = evaluator ? 'Evaluator privileges: select a narrower role for this session.' : principal.role === 'customer' && !principal.customer_id ? 'Customer access is active for policies. An administrator must link your existing RideWise customer record before bookings or payments become available.' : 'Your customer scope and role are assigned by the server.';
   $('authBadge').textContent = 'Firebase verified'; $('authBadge').classList.add('verified');
   roleChanged();
+  if (!evaluator) await startSession();
 }
-function roleChanged() { $('customerField').classList.toggle('hidden', $('role').value !== 'customer'); }
+function roleChanged() { $('customerField').classList.toggle('hidden', $('role').value !== 'customer' || (principal?.role === 'customer' && !principal.customer_id)); }
+function authMode(signUp) {
+  creatingAccount = signUp;
+  $('signInTab').classList.toggle('selected', !signUp); $('signUpTab').classList.toggle('selected', signUp);
+  $('emailLogin').textContent = signUp ? 'Create customer account' : 'Sign in';
+  $('loginHint').textContent = signUp ? 'Create your Customer account with email or Google.' : 'Sign in with your email or Google account.';
+  $('signUpHint').classList.toggle('hidden', !signUp); $('forgotPassword').classList.toggle('hidden', signUp);
+  $('password').autocomplete = signUp ? 'new-password' : 'current-password'; $('password').minLength = signUp ? 8 : 1;
+  $('sessionError').textContent = '';
+}
+function setAuthBusy(value) {
+  authBusy = value;
+  for (const id of ['emailLogin','googleLogin','tokenLogin','signInTab','signUpTab','forgotPassword']) $(id).disabled = value;
+}
+function authError(error) {
+  const code = /^auth\/[a-z-]+$/.test(error?.code || '') ? ` (${error.code})` : '';
+  const hints = {'auth/operation-not-allowed':'This sign-in method is not enabled in Firebase. Ask the administrator to enable it.', 'auth/popup-blocked':'Allow the Google sign-in popup and retry.', 'auth/popup-closed-by-user':'Google sign-in was closed. You can try again.', 'auth/account-exists-with-different-credential':'Use your existing sign-in method for this email first.', 'auth/invalid-credential':'The email or password could not be verified.', 'auth/email-already-in-use':'An account already exists for this email. Sign in instead.', 'auth/weak-password':'Choose a stronger password.', 'auth/network-request-failed':'The authentication service could not be reached. Check your connection and retry.'};
+  $('sessionError').textContent = (hints[error?.code] || 'Sign-in or assigned access could not be verified. Check credentials and administrator role assignment.') + code;
+}
 async function login(custom = false) {
   $('sessionError').textContent = '';
-  if (!firebaseAuth) return;
+  if (!firebaseAuth || authBusy) return;
+  setAuthBusy(true);
   try {
     if (custom) { const token = $('customToken').value; $('customToken').value = ''; await firebaseApi.signInWithCustomToken(firebaseAuth, token); }
-    else { const password = $('password').value; $('password').value = ''; await firebaseApi.signInWithEmailAndPassword(firebaseAuth, $('email').value, password); }
+    else { const password = $('password').value; $('password').value = ''; const email = $('email').value.trim(); if (creatingAccount) await firebaseApi.createUserWithEmailAndPassword(firebaseAuth, email, password); else await firebaseApi.signInWithEmailAndPassword(firebaseAuth, email, password); }
     await signedIn();
-  } catch (error) {
-    const code = /^auth\/[a-z-]+$/.test(error?.code || '') ? ` (${error.code})` : '';
-    $('sessionError').textContent = 'Sign-in or assigned access could not be verified. Check credentials and administrator role assignment.' + code;
-  }
+  } catch (error) { authError(error); } finally { setAuthBusy(false); }
+}
+async function googleLogin() {
+  if (!firebaseAuth || authBusy) return;
+  $('sessionError').textContent = ''; setAuthBusy(true);
+  try { const google = new firebaseApi.GoogleAuthProvider(); google.setCustomParameters({prompt:'select_account'}); await firebaseApi.signInWithPopup(firebaseAuth, google); await signedIn(); }
+  catch (error) { authError(error); } finally { setAuthBusy(false); }
+}
+async function forgotPassword() {
+  if (!firebaseAuth || authBusy) return;
+  if (!$('email').value.trim() || !$('email').checkValidity()) { $('sessionError').textContent = 'Enter your email address first.'; return; }
+  setAuthBusy(true);
+  try { await firebaseApi.sendPasswordResetEmail(firebaseAuth, $('email').value.trim()); $('sessionError').textContent = 'If this account supports email sign-in, check your inbox for reset instructions.'; }
+  catch { $('sessionError').textContent = 'Reset instructions could not be requested. Please retry.'; } finally { setAuthBusy(false); }
 }
 async function startSession() {
   $('sessionError').textContent = '';
   try {
     const role = $('role').value;
-    const next = await (await api('/api/session', { method: 'POST', body: JSON.stringify({ role, customer_id: role === 'customer' ? $('customerId').value.trim().toUpperCase() : null }) })).json();
+    const next = await (await api('/api/session', { method: 'POST', body: JSON.stringify({ role, customer_id: role === 'customer' ? ($('customerId').value.trim().toUpperCase() || null) : null }) })).json();
     clearConversation(); session = next;
-    $('scope').textContent = role === 'customer' ? 'Customer · ' + session.customer_id : 'Support agent';
+    $('scope').textContent = role === 'customer' ? (session.customer_id ? 'Customer · ' + session.customer_id : 'Customer · policy access') : 'Support agent';
     $('principalLabel').textContent = principal.role === 'evaluator' ? 'Firebase evaluator · selected role' : 'Firebase verified · assigned role';
     $('sessionDialog').close(); updateEnabled();
     notice('Read-only session ready.' + (!config.model_ready ? ' NeoStats model setup is pending; direct lookups and source excerpts are available.' : ''));
+    if (role === 'customer' && !session.customer_id) notice('Policies are available. Ask the administrator to link your customer record for personal bookings and payments.');
     const intro = el('div', undefined, 'welcome'); intro.append(el('div', 'YOUR SESSION IS READY', 'eyebrow'), el('h2', 'What would you\nlike to know?'), el('p', 'Ask about a booking, refund, charge or policy. Every answer includes its source.'));
     const suggestions = el('div', undefined, 'suggestions');
-    for (const question of role === 'customer' ? ['Show my bookings', 'What are the refund rules?', 'How do I charge an EV?', 'What is my KYC status?'] : ['Count bookings by hub', 'What are the refund rules?', 'List active vehicles by hub', 'What are the late return penalties?']) {
+    for (const question of role === 'customer' ? (session.customer_id ? ['Show my bookings', 'What are the refund rules?', 'How do I charge an EV?', 'What is my KYC status?'] : ['What are the refund rules?', 'How do I charge an EV?', 'What are the late return penalties?', 'What is the deposit policy?']) : ['Count bookings by hub', 'What are the refund rules?', 'List active vehicles by hub', 'What are the late return penalties?']) {
       const b = el('button', question); b.addEventListener('click', () => sendQuestion(question)); suggestions.append(b);
     }
     intro.append(suggestions); $('messages').append(intro); $('question').focus();
@@ -172,7 +208,8 @@ $('closeSession').addEventListener('click', () => $('sessionDialog').close());
 $('closeDrawer').addEventListener('click', () => document.body.classList.add('drawer-closed'));
 $('openEvidence').addEventListener('click', () => document.body.classList.toggle('drawer-closed'));
 $('conversationNav').addEventListener('click', () => { $('sessionDialog').close(); $('question').focus(); });
-$('role').addEventListener('change', roleChanged); $('emailLogin').addEventListener('click', () => login()); $('tokenLogin').addEventListener('click', () => login(true)); $('startSession').addEventListener('click', startSession);
+$('role').addEventListener('change', roleChanged); $('emailAuthForm').addEventListener('submit', e => {e.preventDefault(); login();}); $('tokenLogin').addEventListener('click', () => login(true)); $('startSession').addEventListener('click', startSession);
+$('signInTab').addEventListener('click', () => authMode(false)); $('signUpTab').addEventListener('click', () => authMode(true)); $('googleLogin').addEventListener('click', googleLogin); $('forgotPassword').addEventListener('click', forgotPassword);
 $('drawerTabs').addEventListener('click', e => { if (e.target.dataset.tab) { activeTab = e.target.dataset.tab; renderEvidence(); } });
 for (const b of document.querySelectorAll('[data-question]')) b.addEventListener('click', () => sendQuestion(b.dataset.question));
 $('policiesNav').addEventListener('click', async () => {
@@ -185,6 +222,7 @@ async function signOut() {
   controller?.abort();
   try { if (session) await api('/api/session/' + session.session_id, { method: 'DELETE' }); } catch {}
   await firebaseApi?.signOut(firebaseAuth); session = null; principal = null; clearConversation(); updateEnabled();
+  authMode(false);
   $('scope').textContent = 'Not signed in'; $('principalLabel').textContent = 'Firebase authentication'; $('authBadge').textContent = config.auth_ready ? 'Sign-in required' : 'Setup required'; $('authBadge').classList.remove('verified'); $('roleState').classList.add('hidden'); if (config.auth_ready) $('loginState').classList.remove('hidden'); showDialog();
 }
 $('signOut').addEventListener('click', signOut);

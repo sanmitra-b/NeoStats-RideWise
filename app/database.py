@@ -41,6 +41,8 @@ def customer_exists(path, cid):
         return c.execute('SELECT 1 FROM customers WHERE customer_id=?', (cid,)).fetchone() is not None
 
 def profile(path, session, cid=None, contact=False):
+    if session.role == 'customer' and not session.customer_id:
+        raise PermissionError('Your sign-in is not linked to a RideWise customer record yet. You can read policies; ask the administrator to link your account for personal records.')
     target = session.customer_id if session.role == 'customer' else cid
     if not target:
         raise ValueError('Specify a customer ID for a work-related profile lookup.')
@@ -61,6 +63,8 @@ def profile(path, session, cid=None, contact=False):
 
 @contextmanager
 def projection(path, session):
+    if session.role == 'customer' and not session.customer_id:
+        raise PermissionError('Customer record linking is required before retrieving personal records.')
     c = sqlite3.connect(':memory:')
     c.row_factory = sqlite3.Row
     with source(path) as original:
@@ -131,6 +135,8 @@ def where(plan, fields=FIELDS):
 
 def query(path, session, plan: Plan):
     if session.role == 'customer':
+        if not session.customer_id:
+            raise PermissionError('Your sign-in is not linked to a RideWise customer record yet. You can read policies; ask the administrator to link your account for bookings or payments.')
         if plan.customer_id and plan.customer_id != session.customer_id:
             raise PermissionError('Other customer information is not available.')
         if plan.operation in ('analytics', 'vehicles'):

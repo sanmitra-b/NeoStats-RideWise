@@ -4,6 +4,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class Strict(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
+class RegistrationRequest(Strict):
+    pass
+
 class Principal(Strict):
     uid: str
     role: Literal['customer', 'support_agent', 'evaluator']

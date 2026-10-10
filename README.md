@@ -15,7 +15,13 @@ If `.env` already exists, preserve it. Set `RIDEWISE_DATA_DIR` to the unpacked s
 
 Configure Firebase Authentication: register a web app, enable Email/Password if using regular accounts, add `localhost` to authorized domains, and put its public web fields in `.env`. Set `GOOGLE_APPLICATION_CREDENTIALS` to a private Admin service-account JSON path outside Git. Set `FIREBASE_PROJECT_ID`. Firebase setup is a prerequisite; no authentication bypass is enabled. No customer dataset is uploaded to Firebase or Firestore.
 
-Assign trusted roles with the operator CLI. For regular customers, create an email/password user in Firebase first, then use its UID:
+The app includes **Sign in**, **Create account**, **Continue with Google**, and password reset. Email/password credentials are chosen by the user during sign-up; there is no shared/default password. Enable Google under Firebase Authentication → Sign-in method → Google and choose the project support email. Google sign-in creates an account on its first successful use. Both email and Google registrations receive Customer through the authenticated backend bootstrap; the browser cannot submit a role or customer ID. Existing staff/evaluator assignments are preserved.
+
+Use Chrome or Edge for the Google popup and allow popups for the local app. The in-app browser's Google flow timed out during verification; a completed Google account sign-in is not claimed. Email sign-up uses the Firebase SDK directly. No real user's password is generated or recorded by this project. `python scripts/check_signup.py` verifies default Customer assignment and blocked self-elevation with a disposable Firebase identity, then removes only that test identity.
+
+New Customers initially get **policy access**. Their sign-in is not automatically matched to supplied customer emails or an arbitrary chosen ID. An administrator must verify ownership and link the UID to an existing RideWise customer record. Personal-record tools deny access until linked; the provided database remains unchanged. The UID is shown in Session & access and Firebase Console → Authentication → Users.
+
+Assign trusted roles with the operator CLI. Use the existing user's UID from Firebase Authentication:
 
 ```powershell
 python scripts/provision_identity.py --uid FIREBASE_UID --role customer --customer-id CUST0001
@@ -23,7 +29,9 @@ python scripts/provision_identity.py --uid STAFF_UID --role support_agent
 python scripts/provision_identity.py --uid hackathon-evaluator --role evaluator --token-file secrets/evaluator-token.txt
 ```
 
-The CLI changes Firebase claims and a private local UID/customer mapping. It is an administrator action, never an app endpoint. Keep the evaluator token private. Paste it in **Session & access → Evaluator access**; the browser exchanges the custom token for a Firebase ID token held only in memory. An evaluator then selects Customer + ID or Support Agent. Regular principals cannot select an elevated role or someone else's customer ID. No identity means no protected database access.
+The CLI uses the Firebase Admin SDK to set the `role` custom claim and maintains the private local UID/customer mapping. Firebase Console's Users screen does not directly assign these application roles. To make a support executive, run the `--role support_agent` command from this trusted backend machine; then have the user sign out and sign back in to refresh claims. There is no public support-role selector or promotion endpoint. Keep Admin credentials private. Regular users automatically enter their assigned session; only the evaluator selects a narrower role.
+
+For evaluator access, paste the private token in **Session & access → Evaluator access**; the browser exchanges it for a Firebase ID token held only in memory. The evaluator can select Customer + ID or Support Agent. Regular principals cannot select an elevated role or someone else's customer ID. No identity means no protected database access.
 
 Custom sign-in tokens expire after one hour. To generate a fresh one for another sign-in, run the evaluator provisioning command again with `--replace-token`. An active browser session refreshes its ID token automatically; reloading clears its in-memory identity. Backend verification permits 30 seconds of laptop clock drift while retaining signature, audience and revocation checks. Keep the system clock synchronized.
 
