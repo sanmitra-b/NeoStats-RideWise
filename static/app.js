@@ -113,13 +113,18 @@ async function startSession() {
     $('sessionDialog').close(); updateEnabled();
     notice('Read-only session ready.' + (!config.model_ready ? ' NeoStats model setup is pending; direct lookups and source excerpts are available.' : ''));
     if (role === 'customer' && !session.customer_id) notice('Policies are available. Ask the administrator to link your customer record for personal bookings and payments.');
-    const intro = el('div', undefined, 'welcome'); intro.append(el('div', 'YOUR SESSION IS READY', 'eyebrow'), el('h2', 'What would you\nlike to know?'), el('p', 'Ask about a booking, refund, charge or policy. Every answer includes its source.'));
-    const suggestions = el('div', undefined, 'suggestions');
-    for (const question of role === 'customer' ? (session.customer_id ? ['Show my bookings', 'What are the refund rules?', 'How do I charge an EV?', 'What is my KYC status?'] : ['What are the refund rules?', 'How do I charge an EV?', 'What are the late return penalties?', 'What is the deposit policy?']) : ['Count bookings by hub', 'What are the refund rules?', 'List active vehicles by hub', 'What are the late return penalties?']) {
-      const b = el('button', question); b.addEventListener('click', () => sendQuestion(question)); suggestions.append(b);
-    }
-    intro.append(suggestions); $('messages').append(intro); $('question').focus(); await pages.openPath();
+    renderConversationWelcome(); $('question').focus(); await pages.openPath();
   } catch (e) { $('sessionError').textContent = e.message; }
+}
+function renderConversationWelcome() {
+  if (!session) return;
+  const role = session.role;
+  const intro = el('div', undefined, 'welcome'); intro.append(el('div', 'YOUR SESSION IS READY', 'eyebrow'), el('h2', 'What would you\nlike to know?'), el('p', 'Ask about a booking, refund, charge or policy. Every answer includes its source.'));
+  const suggestions = el('div', undefined, 'suggestions');
+  for (const question of role === 'customer' ? (session.customer_id ? ['Show my bookings', 'What are the refund rules?', 'How do I charge an EV?', 'What is my KYC status?'] : ['What are the refund rules?', 'How do I charge an EV?', 'What are the late return penalties?', 'What is the deposit policy?']) : ['Count bookings by hub', 'What are the refund rules?', 'List active vehicles by hub', 'What are the late return penalties?']) {
+    const b = el('button', question); b.addEventListener('click', () => sendQuestion(question)); suggestions.append(b);
+  }
+  intro.append(suggestions); $('messages').append(intro); $('messages').scrollTop = 0;
 }
 function messageNode(text, user = false) {
   if ($('messages').querySelector('.welcome')) $('messages').replaceChildren();
@@ -210,7 +215,7 @@ async function reset() {
   showChat();
   if (!session) { showDialog(); return; }
   controller?.abort();
-  try { const result = await (await api(`/api/conversation/${session.session_id}/reset`, { method: 'POST' })).json(); session.generation = result.generation; clearConversation(); $('question').value = ''; notice('New conversation started. Previous context and evidence cleared.'); } catch (e) { notice(e.message); }
+  try { const result = await (await api(`/api/conversation/${session.session_id}/reset`, { method: 'POST' })).json(); session.generation = result.generation; clearConversation(); renderConversationWelcome(); $('question').value = ''; $('question').focus(); notice('New conversation started. Previous context and evidence cleared.'); } catch (e) { notice(e.message); }
 }
 $('chatForm').addEventListener('submit', e => { e.preventDefault(); sendQuestion($('question').value); });
 $('question').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuestion($('question').value); } });
