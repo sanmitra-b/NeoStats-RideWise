@@ -14,4 +14,10 @@ BASE_URL = os.getenv('NEOSTATS_BASE_URL', '')
 API_KEY = os.getenv('NEOSTATS_API_KEY', '')
 MODEL = os.getenv('NEOSTATS_MODEL', '')
 MAPPING = Path(os.getenv('CUSTOMER_MAPPING_FILE', str(ROOT / 'secrets' / 'customer_mapping.json')))
+# Set the embedding model ONLY if supplied by NeoStats; otherwise use the FAQ local exception.
+EMBEDDING_MODEL = os.getenv('NEOSTATS_EMBEDDING_MODEL', '')
+LOCAL_EMBEDDING_MODEL = os.getenv('LOCAL_EMBEDDING_MODEL', 'BAAI/bge-small-en-v1.5')
+VECTOR_PATH = ROOT / 'derived' / 'qdrant'
+EMBEDDING_CACHE = ROOT / 'derived' / 'embedding_models'
+HISTORY = ROOT / 'derived' / 'chat_history.db'
 TIMEOUT = min(45, max(5, int(os.getenv('MODEL_TIMEOUT_SECONDS', '25'))))

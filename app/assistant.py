@@ -5,6 +5,7 @@ from time import monotonic
 from . import config, database, calculations
 from .models import Plan, Filter
 from .provider import provider, ProviderUnavailable
+from .policies import PolicyRetrievalUnavailable
 
 def local_plan(message, session):
     q = message.lower()
@@ -21,7 +22,7 @@ def local_plan(message, session):
     if bid and not any(term in q for term in ('count', 'how many', 'total revenue', 'by hub', 'across')):
         op = 'refund' if 'refund' in q else 'charges' if any(x in q for x in ('late', 'penalt', 'charge', 'damage', 'battery fee')) else 'rental' if any(x in q for x in ('rental cost', 'rental estimate', 'rental rate')) else 'payments' if 'pay' in q else 'bookings'
         return Plan(operation=op, booking_id=bid, customer_id=cid)
-    if any(x in q for x in ('policy', 'rule', 'how to charge', 'charging', 'ev guide', 'deposit', 'eligib', 'licence', 'license', 'minimum age', 'no show', 'no-show', 'breakdown', 'refund', 'late return', 'cancellation')):
+    if any(x in q for x in ('policy', 'rule', 'how to charge', 'how do i charge', 'charging', 'ev guide', 'deposit', 'eligib', 'licence', 'license', 'minimum age', 'no show', 'no-show', 'breakdown', 'refund', 'late return', 'cancellation')):
         topic = 'refund' if 'refund' in q or 'cancel' in q else 'penalty' if 'late' in q or 'damage' in q else 'ev' if any(x in q for x in ('ev', 'charging', 'battery', 'breakdown')) else 'rental'
         return Plan(operation='policy', topic=topic)
     listing = re.fullmatch(r'(?:please )?(?:(?:show|list) )?(?:my )?(?:(upcoming|completed|ongoing) )?bookings[?.! ]*', q.strip())
@@ -108,7 +109,7 @@ async def answer(message, session, policies, emit, generation):
             worker = 'EV Guide' if plan.topic == 'ev' else 'Policy'
             await event(worker, 'running', 'Retrieving original policy pages and reviewed visuals')
             if plan.operation == 'policy':
-                pages = policies.retrieve(message, plan.topic)
+                pages = await asyncio.to_thread(policies.retrieve, message, plan.topic)
             else:
                 rows = evidence[0]['rows']
                 if not rows:
@@ -122,7 +123,7 @@ async def answer(message, session, policies, emit, generation):
                     policies.require('rental', 'penalty')
                     pages = policies.pages_for('rental', 'penalty')
             evidence.extend(pages)
-            await event(worker, 'completed', 'Policy pages selected with file hashes and provenance', [e['id'] for e in pages])
+            await event(worker, 'completed', 'Semantic passages retrieved from Qdrant; reviewed annexures retained' if plan.operation == 'policy' else 'Authoritative policy version selected for calculation', [e['id'] for e in pages])
         if plan.operation in ('refund', 'charges', 'rental'):
             await event('Charges', 'running', 'Calculating in Python using source rules')
             b, payments, damages = evidence[0]['rows'][0], evidence[1]['rows'], evidence[2]['rows']
@@ -165,4 +166,4 @@ async def answer(message, session, policies, emit, generation):
         return {'state': 'answered', 'answer': text, 'evidence': evidence, 'notices': notices, 'operation': plan.operation}
     except (PermissionError, ValueError, ProviderUnavailable) as exc:
         await event('Router', 'failed', str(exc))
-        return {'state': 'refused' if isinstance(exc, PermissionError) else 'unavailable' if isinstance(exc, ProviderUnavailable) else 'clarification', 'answer': str(exc), 'evidence': evidence}
+        return {'state': 'refused' if isinstance(exc, PermissionError) else 'unavailable' if isinstance(exc, (ProviderUnavailable, PolicyRetrievalUnavailable)) else 'clarification', 'answer': str(exc), 'evidence': evidence}

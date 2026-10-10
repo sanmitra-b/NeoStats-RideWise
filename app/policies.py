@@ -1,5 +1,4 @@
 import hashlib
-import re
 from pypdf import PdfReader
 
 FILES = {
@@ -25,11 +24,16 @@ VISUALS = {
 }
 VERSIONS = {'rental': '3.0', 'refund_v1': '1.0', 'refund_v2': '2.0', 'penalty': '2.1', 'ev': '1.4'}
 
+class PolicyRetrievalUnavailable(ValueError):
+    pass
+
 class Policies:
     def __init__(self, directory):
         self.directory = directory
         self.pages = []
         self.valid = set()
+        self.semantic_ready = False
+        self.semantic_error = None
         for key, filename in FILES.items():
             path = directory / filename
             if not path.exists():
@@ -51,20 +55,51 @@ class Policies:
         if any(k not in self.valid for k in keys):
             raise ValueError('A required policy is missing or changed. Review it before calculating charges.')
 
+    def prepare(self):
+        from . import semantic
+        try:
+            semantic.get_index(self.pages)
+            self.semantic_ready = True
+            self.semantic_error = None
+        except Exception:
+            self.semantic_ready = False
+            self.semantic_error = 'Policy semantic search is unavailable. Check the embedding model cache/configuration and rebuild the index.'
+
     def retrieve(self, question, topic='all'):
+        from . import semantic
         keys = {'rental': {'rental'}, 'refund': {'rental', 'refund_v1', 'refund_v2'},
                 'penalty': {'rental', 'penalty'}, 'ev': {'ev', 'penalty'}, 'all': set(FILES)}[topic]
-        tokens = set(re.findall(r'[a-z]{3,}', question.lower())) - {'what', 'which', 'the', 'and', 'can', 'for', 'how', 'does', 'with'}
-        scored = sorted(((sum(t in p['excerpt'].lower() for t in tokens), p) for p in self.pages if p['key'] in keys), key=lambda x: x[0], reverse=True)
-        selected = [p for score, p in scored if score > 0][:6]
-        if not selected:
-            selected = [p for _, p in scored][:4]
-        # Keep authoritative visual annexures with the related prose.
-        wanted = {p['id'] for p in selected}
+        try:
+            hits, model = semantic.search(self.pages, question, keys)
+        except Exception:
+            self.semantic_ready = False
+            raise PolicyRetrievalUnavailable('Policy semantic search is unavailable. Check the embedding model cache/configuration and retry; no keyword search was substituted.') from None
+        self.semantic_ready = True
+        self.semantic_error = None
+        originals = {p['id']: p for p in self.pages}
+        selected = {}
+        for hit in hits:
+            chunk = hit.payload
+            pid = chunk['page_id']
+            if pid not in selected:
+                selected[pid] = {**originals[pid], 'excerpt': '', 'retrieval': {
+                    'method': 'Qdrant cosine semantic search', 'embedding_model': model,
+                    'score': round(hit.score, 4), 'chunks': []}}
+            selected[pid]['excerpt'] += ('\n\n' if selected[pid]['excerpt'] else '') + chunk['text']
+            selected[pid]['retrieval']['chunks'].append(chunk['chunk_id'])
+        # Supplement semantic hits with authoritative reviewed financial/visual annexures.
         for p in self.pages:
-            if (p['key'], p['page']) in VISUALS and p['key'] in keys and p['id'] not in wanted:
-                selected.append(p)
-        return selected
+            if p['reviewed'] and (p['key'], p['page']) in VISUALS and p['key'] in keys and p['id'] not in selected:
+                selected[p['id']] = {**p, 'retrieval': {'method': 'Required reviewed visual annexure',
+                    'embedding_model': model, 'score': None, 'chunks': []}}
+        for p in self.pages:
+            visual = VISUALS.get((p['key'], p['page'])) if p['reviewed'] else None
+            if visual and p['id'] in selected:
+                visual = ' '.join(visual.split())
+                if visual not in selected[p['id']]['excerpt']:
+                    selected[p['id']]['excerpt'] += '\n\n' + visual
+                    selected[p['id']]['retrieval']['annexure_added'] = True
+        return list(selected.values())
 
     def pages_for(self, *keys):
         return [p for p in self.pages if p['key'] in keys]

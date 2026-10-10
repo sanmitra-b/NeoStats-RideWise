@@ -46,7 +46,7 @@ async function signedIn() {
   await api('/api/account/bootstrap', { method: 'POST', body: '{}' });
   await firebaseAuth.currentUser.getIdToken(true);
   principal = await (await api('/api/me')).json();
-  $('password').value = ''; $('customToken').value = '';
+  $('password').value = '';
   $('loginState').classList.add('hidden'); $('roleState').classList.remove('hidden');
   $('identity').textContent = 'Assigned role: ' + principal.role.replaceAll('_', ' ') + ' · Account UID: ' + principal.uid;
   const evaluator = principal.role === 'evaluator';
@@ -56,6 +56,7 @@ async function signedIn() {
   $('evaluationLabel').textContent = evaluator ? 'Evaluator privileges: select a narrower role for this session.' : principal.role === 'customer' && !principal.customer_id ? 'Customer access is active for policies. An administrator must link your existing RideWise customer record before bookings or payments become available.' : 'Your customer scope and role are assigned by the server.';
   $('authBadge').textContent = 'Firebase verified'; $('authBadge').classList.add('verified');
   roleChanged();
+  await refreshHistory();
   if (!evaluator) await startSession();
 }
 function roleChanged() { $('customerField').classList.toggle('hidden', $('role').value !== 'customer' || (principal?.role === 'customer' && !principal.customer_id)); }
@@ -70,20 +71,19 @@ function authMode(signUp) {
 }
 function setAuthBusy(value) {
   authBusy = value;
-  for (const id of ['emailLogin','googleLogin','tokenLogin','signInTab','signUpTab','forgotPassword']) $(id).disabled = value;
+  for (const id of ['emailLogin','googleLogin','signInTab','signUpTab','forgotPassword']) $(id).disabled = value;
 }
 function authError(error) {
   const code = /^auth\/[a-z-]+$/.test(error?.code || '') ? ` (${error.code})` : '';
   const hints = {'auth/operation-not-allowed':'This sign-in method is not enabled in Firebase. Ask the administrator to enable it.', 'auth/popup-blocked':'Allow the Google sign-in popup and retry.', 'auth/popup-closed-by-user':'Google sign-in was closed. You can try again.', 'auth/account-exists-with-different-credential':'Use your existing sign-in method for this email first.', 'auth/invalid-credential':'The email or password could not be verified.', 'auth/email-already-in-use':'An account already exists for this email. Sign in instead.', 'auth/weak-password':'Choose a stronger password.', 'auth/network-request-failed':'The authentication service could not be reached. Check your connection and retry.'};
   $('sessionError').textContent = (hints[error?.code] || 'Sign-in or assigned access could not be verified. Check credentials and administrator role assignment.') + code;
 }
-async function login(custom = false) {
+async function login() {
   $('sessionError').textContent = '';
   if (!firebaseAuth || authBusy) return;
   setAuthBusy(true);
   try {
-    if (custom) { const token = $('customToken').value; $('customToken').value = ''; await firebaseApi.signInWithCustomToken(firebaseAuth, token); }
-    else { const password = $('password').value; $('password').value = ''; const email = $('email').value.trim(); if (creatingAccount) await firebaseApi.createUserWithEmailAndPassword(firebaseAuth, email, password); else await firebaseApi.signInWithEmailAndPassword(firebaseAuth, email, password); }
+    { const password = $('password').value; $('password').value = ''; const email = $('email').value.trim(); if (creatingAccount) await firebaseApi.createUserWithEmailAndPassword(firebaseAuth, email, password); else await firebaseApi.signInWithEmailAndPassword(firebaseAuth, email, password); }
     await signedIn();
   } catch (error) { authError(error); } finally { setAuthBusy(false); }
 }
@@ -132,6 +132,7 @@ async function sendQuestion(text) {
   busy = true; updateEnabled(); notice('Gathering permitted evidence…');
   const version = renderGeneration, current = { ...session }, requestId = crypto.randomUUID();
   messageNode(text, true); const { card, body } = messageNode('');
+  $('messages').scrollTop = $('messages').scrollHeight;
   const routing = el('details', undefined, 'routing'); routing.open = true; routing.append(el('summary', 'Routing & execution'));
   const workers = el('div', undefined, 'workers'), summaries = el('div', '', 'worker-summary'); routing.append(workers, summaries); card.insertBefore(routing, body);
   const nodes = new Map(); controller = new AbortController();
@@ -140,6 +141,7 @@ async function sendQuestion(text) {
     const response = await api('/api/chat/stream', { method: 'POST', signal: controller.signal, body: JSON.stringify({ session_id: current.session_id, generation: current.generation, message: text.trim(), request_id: requestId }) });
     const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
     while (true) {
+      const followBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
       const { value, done } = await reader.read(); buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       const blocks = buffer.split('\n\n'); buffer = blocks.pop();
       for (const block of blocks) {
@@ -163,11 +165,11 @@ async function sendQuestion(text) {
           notice(event.state === 'answered' ? 'Answer ready. Inspect its source badges.' : 'No business answer was issued: ' + event.state.replaceAll('_', ' '));
         }
       }
-      $('messages').scrollTop = $('messages').scrollHeight;
+      if (followBottom) $('messages').scrollTop = $('messages').scrollHeight;
       if (done) break;
     }
     if (!final && version === renderGeneration) throw new Error('Stream interrupted. No completed answer was received.');
-    if (final && version === renderGeneration) $('question').value = '';
+    if (final && version === renderGeneration) { $('question').value = ''; await refreshHistory(); }
   } catch (e) {
     if (version === renderGeneration) { body.textContent = e.name === 'AbortError' ? 'Request stopped. No completed answer was issued.' : e.message; notice('You can edit and retry your question.'); $('question').value = text; }
   } finally { busy = false; updateEnabled(); }
@@ -184,6 +186,8 @@ function renderEvidence() {
     if (e.kind === 'sql') {
       body.append(el('p', e.scope), el('pre', e.sql), el('p', 'Bound parameters'), el('pre', JSON.stringify(e.parameters, null, 2)), el('p', `${e.rows.length} displayed rows · ${e.duration_ms} ms${e.truncated ? ' · limited result' : ''}`), el('pre', JSON.stringify(e.rows, null, 2)));
     } else if (e.kind === 'pdf') {
+      if (e.retrieval) body.append(el('p', e.retrieval.method), el('p', 'Embedding: ' + e.retrieval.embedding_model + (e.retrieval.score !== null ? ' · Cosine similarity: ' + e.retrieval.score : '')), el('p', 'Passages: ' + (e.retrieval.chunks.join(', ') || 'Reviewed annexure')));
+      if (e.retrieval?.annexure_added) body.append(el('p', 'Reviewed visual annexure added to the retrieved passages.'));
       body.append(el('p', `Page ${e.page} · Version ${e.version}`), el('p', e.method), el('pre', e.excerpt), el('p', 'SHA-256 ' + e.hash, 'hash'));
       const open = el('button', 'Open original PDF ↗'); open.addEventListener('click', async () => {
         const blank = window.open('', '_blank');
@@ -208,7 +212,7 @@ $('closeSession').addEventListener('click', () => $('sessionDialog').close());
 $('closeDrawer').addEventListener('click', () => document.body.classList.add('drawer-closed'));
 $('openEvidence').addEventListener('click', () => document.body.classList.toggle('drawer-closed'));
 $('conversationNav').addEventListener('click', () => { $('sessionDialog').close(); $('question').focus(); });
-$('role').addEventListener('change', roleChanged); $('emailAuthForm').addEventListener('submit', e => {e.preventDefault(); login();}); $('tokenLogin').addEventListener('click', () => login(true)); $('startSession').addEventListener('click', startSession);
+$('role').addEventListener('change', roleChanged); $('emailAuthForm').addEventListener('submit', e => {e.preventDefault(); login();}); $('startSession').addEventListener('click', startSession);
 $('signInTab').addEventListener('click', () => authMode(false)); $('signUpTab').addEventListener('click', () => authMode(true)); $('googleLogin').addEventListener('click', googleLogin); $('forgotPassword').addEventListener('click', forgotPassword);
 $('drawerTabs').addEventListener('click', e => { if (e.target.dataset.tab) { activeTab = e.target.dataset.tab; renderEvidence(); } });
 for (const b of document.querySelectorAll('[data-question]')) b.addEventListener('click', () => sendQuestion(b.dataset.question));
@@ -222,9 +226,63 @@ async function signOut() {
   controller?.abort();
   try { if (session) await api('/api/session/' + session.session_id, { method: 'DELETE' }); } catch {}
   await firebaseApi?.signOut(firebaseAuth); session = null; principal = null; clearConversation(); updateEnabled();
+  $('historyList').replaceChildren(); $('historyDialogList').replaceChildren(); $('historyDialog').close();
   authMode(false);
   $('scope').textContent = 'Not signed in'; $('principalLabel').textContent = 'Firebase authentication'; $('authBadge').textContent = config.auth_ready ? 'Sign-in required' : 'Setup required'; $('authBadge').classList.remove('verified'); $('roleState').classList.add('hidden'); if (config.auth_ready) $('loginState').classList.remove('hidden'); showDialog();
 }
 $('signOut').addEventListener('click', signOut);
 $('signOutSession').addEventListener('click', signOut);
+async function refreshHistory() {
+  const owner = principal?.uid;
+  if (!owner) return;
+  try {
+    const chats = await (await api('/api/history')).json();
+    if (owner !== principal?.uid) return;
+    for (const id of ['historyList', 'historyDialogList']) {
+      const list = $(id); list.replaceChildren();
+      if (!chats.length) list.append(el('p', 'Your conversations will appear here.', 'muted'));
+      for (const chat of chats) {
+        const row = el('div', undefined, 'history-row');
+        const open = el('button', chat.title, 'history-open');
+        open.title = chat.role.replaceAll('_', ' ') + (chat.customer_id ? ' · ' + chat.customer_id : '') + ' · ' + chat.updated_at;
+        open.addEventListener('click', () => resumeHistory(chat.id));
+        const remove = el('button', '×', 'history-delete'); remove.setAttribute('aria-label', 'Delete conversation: ' + chat.title);
+        remove.addEventListener('click', async () => {
+          if (busy) { notice('Stop the current answer before deleting history.'); return; }
+          if (!confirm('Delete this saved conversation?')) return;
+          try { const deleted = await (await api('/api/history/' + chat.id, {method:'DELETE'})).json(); if (session && deleted.reset_sessions?.[session.session_id] !== undefined) {session.generation = deleted.reset_sessions[session.session_id]; clearConversation(); notice('Saved conversation deleted. Start a new question.');} await refreshHistory(); }
+          catch (e) { notice(e.message); }
+        });
+        row.append(open, remove); list.append(row);
+      }
+    }
+  } catch (e) { notice('History could not load: ' + e.message); }
+}
+async function resumeHistory(id) {
+  if (busy) { notice('Stop the current answer before switching conversations.'); return; }
+  try {
+    const next = await (await api('/api/history/' + id + '/resume', {method:'POST'})).json();
+    clearConversation(); session = next;
+    $('role').value = next.role; $('customerId').value = next.customer_id || ''; roleChanged();
+    $('scope').textContent = next.role === 'customer' ? 'Customer · ' + (next.customer_id || 'policy access') : 'Support agent';
+    for (const turn of next.turns) {
+      messageNode(turn.question, true); const {card} = messageNode(turn.result.answer);
+      const routing = el('details', undefined, 'routing'); routing.append(el('summary', 'Saved routing & execution'));
+      const workers = el('div', undefined, 'workers');
+      for (const event of turn.events || []) workers.append(el('span', event.worker + ' · ' + event.status, 'worker ' + event.status));
+      routing.append(workers); card.prepend(routing);
+      const badges = el('div', undefined, 'evidence-badges');
+      for (const [kind, label] of [['sql','Executed SQL'],['pdf','PDF sources'],['calculation','Calculation']]) {
+        if (!(turn.result.evidence || []).some(e => e.kind === kind)) continue;
+        const b = el('button', label + ' ↗'); b.addEventListener('click', () => {selectedEvidence = turn.result.evidence; activeTab = kind; document.body.classList.remove('drawer-closed'); renderEvidence();}); badges.append(b);
+      }
+      card.append(badges);
+      if (turn.result.notices?.length) card.append(el('p', turn.result.notices.join('\n'), 'notice'));
+    }
+    $('historyDialog').close(); $('sessionDialog').close(); updateEnabled();
+    $('messages').scrollTop = $('messages').scrollHeight; notice('Saved conversation restored. Continue in its original role and customer scope.');
+  } catch (e) { notice(e.message); }
+}
+$('openHistory').addEventListener('click', async () => {if (!principal) {showDialog(); return;} await refreshHistory(); $('historyDialog').showModal();});
+$('closeHistory').addEventListener('click', () => $('historyDialog').close());
 init().catch(() => notice('Application configuration could not load. Check the local server and retry.'));

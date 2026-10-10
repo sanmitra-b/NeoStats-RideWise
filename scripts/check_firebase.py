@@ -1,4 +1,4 @@
-"""Live Firebase evaluator exchange and both scoped roles; tokens never printed."""
+"""Live Firebase evaluator email sign-in and both scoped roles; tokens never printed."""
 import json
 import sys
 from pathlib import Path
@@ -10,14 +10,15 @@ from app.main import app
 from app.provider import Provider
 
 def main():
-    path = config.ROOT / 'secrets' / 'evaluator-token.txt'
-    if not path.exists():
-        raise SystemExit('Provision evaluator-token.txt first.')
-    r = requests.post('https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken',
-        params={'key': config.WEB['apiKey']}, json={'token': path.read_text().strip(), 'returnSecureToken': True}, timeout=20)
+    from getpass import getpass
+    email = input('Evaluator email: ').strip()
+    password = getpass('Evaluator password: ')
+    r = requests.post('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword',
+        params={'key': config.WEB['apiKey']}, json={'email': email, 'password': password, 'returnSecureToken': True}, timeout=20)
+    del password
     if r.status_code != 200:
         code = r.json().get('error', {}).get('message', 'Unknown error').split(' : ')[0]
-        raise SystemExit('Firebase token exchange failed: ' + code)
+        raise SystemExit('Firebase email sign-in failed: ' + code)
     headers = {'Authorization': 'Bearer ' + r.json()['idToken']}
     with database.source(config.DB) as c:
         cid = c.execute('SELECT customer_id FROM customers ORDER BY customer_id LIMIT 1').fetchone()[0]

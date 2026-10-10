@@ -9,6 +9,7 @@ class Session:
     uid: str
     role: str
     customer_id: str | None
+    conversation_id: str | None = None
     generation: int = 0
     booking_id: str | None = None
     history: list = field(default_factory=list)
@@ -51,6 +52,7 @@ class Sessions:
         s.generation += 1
         s.booking_id = None
         s.history.clear()
+        s.conversation_id = None
         s.seen.clear()
         # A previous turn owns its busy flag until its finally block runs.
         return s.generation

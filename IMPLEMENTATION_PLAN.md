@@ -365,3 +365,7 @@ One-week next steps: production UID/customer onboarding and staff permissions, i
 - New references: [NeoStats visual design](https://www.neostats.ai/), [Firebase ID-token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens), [server-assigned custom claims](https://firebase.google.com/docs/auth/admin/custom-claims), and [custom authentication](https://firebase.google.com/docs/auth/web/custom-auth). Firebase Auth is an identity service, not an alternative LLM or source of business facts.
 
 The governing brief and supplied policy sources determine behaviour. SKOPE and the practice guide inform the architecture; their example data, model choices, performance claims, and code are not evidence for RideWise answers.
+
+## Implemented semantic retrieval revision
+
+The user requested embedding-based RAG after the initial lexical implementation. Replace the earlier lexical/no-vector choice with Qdrant local mode, page-bounded 220-word passages with 40-word overlap, FastEmbed BGE-small 384-dimensional embeddings, topic filters and cosine top-eight retrieval. Preserve original page/hash citations and reviewed financial annexures. Use an event embedding model if supplied, otherwise the explicit local-embedding FAQ exception. Keep customer data out of the index, persist the supporting vector store under ignored derived/, prewarm model/index before the demo, and expose retrieval provenance in the evidence drawer. No Docker is required.

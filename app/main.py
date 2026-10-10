@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from . import config, auth, database
+from . import config, auth, database, history, semantic
 from .models import SessionRequest, ChatRequest, Principal, RegistrationRequest
 from .sessions import sessions
 from .policies import Policies, FILES
@@ -18,8 +18,10 @@ policies = None
 async def lifespan(app):
     global policies
     policies = await asyncio.to_thread(Policies, config.DATA)
+    await asyncio.to_thread(policies.prepare)
     yield
     await provider.close()
+    semantic.close()
 
 app = FastAPI(title='RideWise Assist', lifespan=lifespan, docs_url=None, redoc_url=None)
 app.mount('/static', StaticFiles(directory=config.ROOT / 'static'), name='static')
@@ -47,7 +49,7 @@ def index():
 
 @app.get('/health')
 def health():
-    return {'status': 'ok', 'database_ready': config.DB.exists(), 'policy_ready': bool(policies and len(policies.valid) == 5), 'firebase_ready': auth.configured(), 'model_ready': provider.configured()}
+    return {'status': 'ok', 'database_ready': config.DB.exists(), 'policy_ready': bool(policies and len(policies.valid) == 5), 'semantic_ready': bool(policies and policies.semantic_ready), 'firebase_ready': auth.configured(), 'model_ready': provider.configured()}
 
 @app.get('/api/config')
 def public_config():
@@ -84,6 +86,35 @@ def sign_out(key: str, p: Principal = Depends(auth.principal)):
     sessions.items.pop(key)
     return {'ok': True}
 
+@app.get('/api/history')
+def history_list(p: Principal = Depends(auth.principal)):
+    return history.list_chats(p)
+
+@app.post('/api/history/{conversation_id}/resume')
+def history_resume(conversation_id: str, p: Principal = Depends(auth.principal)):
+    record = history.load_chat(conversation_id, p)
+    if record['customer_id'] and not database.customer_exists(config.DB, record['customer_id']):
+        raise HTTPException(403, 'Saved customer scope is no longer available.')
+    key, s = sessions.create(p, record['role'], record['customer_id'])
+    s.conversation_id = conversation_id
+    s.booking_id = record['booking_id']
+    s.history = [turn['question'] for turn in record['turns'][-8:]]
+    return {'session_id': key, 'generation': s.generation, 'role': s.role,
+            'customer_id': s.customer_id, 'principal_role': p.role, 'turns': record['turns']}
+
+@app.delete('/api/history/{conversation_id}')
+def history_delete(conversation_id: str, p: Principal = Depends(auth.principal)):
+    history.delete_chat(conversation_id, p)
+    reset_sessions = {}
+    for key, s in sessions.items.items():
+        if s.uid == p.uid and s.conversation_id == conversation_id:
+            s.generation += 1
+            s.conversation_id = None
+            s.booking_id = None
+            s.history.clear()
+            reset_sessions[key] = s.generation
+    return {'ok': True, 'reset_sessions': reset_sessions}
+
 @app.get('/api/policies')
 def policy_list(p: Principal = Depends(auth.principal)):
     return [{'key': key, 'filename': filename, 'reviewed': key in policies.valid} for key, filename in FILES.items()]
@@ -115,6 +146,7 @@ async def chat(body: ChatRequest, p: Principal = Depends(auth.principal)):
     try:
         result = await asyncio.wait_for(answer(body.message, s, policies, emit, body.generation), timeout=60)
         sessions.get(body.session_id, p, body.generation)
+        history.save_turn(s, body, result, events)
         return {**result, 'events': events, 'request_id': body.request_id, 'generation': body.generation}
     except asyncio.TimeoutError:
         return {'state': 'unavailable', 'answer': 'Request deadline reached. Please retry.', 'evidence': [], 'events': events}
@@ -129,14 +161,18 @@ async def chat(body: ChatRequest, p: Principal = Depends(auth.principal)):
 async def stream(body: ChatRequest, request: Request, p: Principal = Depends(auth.principal)):
     s = begin(body, p)
     queue = asyncio.Queue()
+    events = []
     async def emit(value):
         if s.generation != body.generation:
             raise asyncio.CancelledError()
+        if value.get('type') == 'worker':
+            events.append(value)
         await queue.put({**value, 'request_id': body.request_id, 'generation': body.generation})
     async def work():
         try:
             result = await asyncio.wait_for(answer(body.message, s, policies, emit, body.generation), timeout=60)
             if s.generation == body.generation:
+                history.save_turn(s, body, result, events)
                 await emit({'type': 'final', **result})
         except asyncio.CancelledError:
             pass
