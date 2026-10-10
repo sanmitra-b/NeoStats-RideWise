@@ -67,10 +67,26 @@ Configure Firebase as described below, then prepare the sources and index with t
 ```powershell
 python scripts/check_sources.py
 python scripts/build_policy_index.py
+```
+
+### Start the app with Python
+
+From the repository root, start the FastAPI server with Python's module
+launcher:
+
+```powershell
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000). `Start-RideWise.ps1` is an optional shortcut for the original Windows installation; it tries the original Ecothon Python path and otherwise uses `python`.
+Keep this terminal open while using the application, then open
+[http://127.0.0.1:8000](http://127.0.0.1:8000) in a browser. Run the source
+check and policy-index commands above before the first start, or whenever the
+source PDFs change. Do not run `python app/main.py`; `app.main:app` is the
+FastAPI application object that Uvicorn serves.
+
+`Start-RideWise.ps1` is an optional shortcut for the original Windows
+installation; it tries the original Ecothon Python path and otherwise uses
+`python`.
 
 First embedding use needs internet to download the model. OCR models run locally, and successful OCR, embeddings and vectors are cached under ignored `derived/` folders. On the development laptop, the first OCR/index build took about 50 seconds; a cached rebuild took about four seconds. These are observations, not installation-time guarantees.
 
